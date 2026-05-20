@@ -1,0 +1,25 @@
+# Xcode
+*.xcodeproj/
+!project.yml
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Tooling caches
+.serena/
+
+# Bundled web vendors (re-fetched by scripts/fetch-assets.sh)
+MarklensCore/Sources/MarklensCore/Resources/Web/mermaid.min.js
+MarklensCore/Sources/MarklensCore/Resources/Web/highlight.min.js
+MarklensCore/Sources/MarklensCore/Resources/Web/hljs-light.css
+MarklensCore/Sources/MarklensCore/Resources/Web/hljs-dark.css

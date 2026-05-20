@@ -1,0 +1,54 @@
+name: Marklens
+options:
+  bundleIdPrefix: com.marklens
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+packages:
+  MarklensCore:
+    path: MarklensCore
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    GENERATE_INFOPLIST_FILE: NO
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Marklens:
+    type: application
+    supportedDestinations: [macOS]
+    sources:
+      - path: Marklens
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.marklens.app
+        INFOPLIST_FILE: Marklens/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Marklens/Marklens.entitlements
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+    dependencies:
+      - package: MarklensCore
+        product: MarklensCore
+      - target: MarklensQuickLook
+        embed: true
+
+  MarklensQuickLook:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: MarklensQuickLook
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.marklens.app.QuickLook
+        INFOPLIST_FILE: MarklensQuickLook/Info.plist
+        CODE_SIGN_ENTITLEMENTS: MarklensQuickLook/MarklensQuickLook.entitlements
+    dependencies:
+      - package: MarklensCore
+        product: MarklensCore
