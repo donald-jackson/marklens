@@ -20,6 +20,8 @@
     <string>1</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>NSHumanReadableCopyright</key>
     <string></string>
     <key>UIApplicationSceneManifest</key>

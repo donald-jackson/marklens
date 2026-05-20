@@ -23,7 +23,7 @@ settings:
 targets:
   Marklens:
     type: application
-    supportedDestinations: [macOS]
+    supportedDestinations: [macOS, iOS]
     sources:
       - path: Marklens
     settings:
@@ -38,6 +38,7 @@ targets:
         product: MarklensCore
       - target: MarklensQuickLook
         embed: true
+        platformFilter: macOS
 
   MarklensQuickLook:
     type: app-extension

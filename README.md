@@ -25,17 +25,19 @@ marklens/
 brew install xcodegen
 
 # 3. Generate the Xcode project from project.yml
-xcodegen generate
+./scripts/generate-project.sh    # wraps `xcodegen generate` + patches a known XcodeGen quirk
 
 # 4. Open in Xcode
 open Marklens.xcodeproj
 ```
 
 Then select the **Marklens** scheme and either:
-- Run on **My Mac** for the macOS build
-- Run on an **iPad simulator / device** for the iPadOS build
+- Run on **My Mac** for the macOS build (Quick Look extension included)
+- Run on an **iPad simulator / device** for the iPadOS build (no Quick Look — iOS doesn't support it)
 
-> **Note for iPad builds**: if Xcode shows "iOS 26.5 is not installed", open Xcode → Settings → Components and install the matching iOS simulator runtime. macOS builds need no extra setup.
+The macOS-only Quick Look extension is conditionally excluded from iOS builds via a patched `platformFilters = (macos,)` entry — see `scripts/generate-project.sh`.
+
+> **iPad runtime**: if Xcode shows "iOS X.Y is not installed", open Xcode → Settings → Components and install the matching iOS simulator runtime.
 
 ## Running tests (CLI)
 
