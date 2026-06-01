@@ -14,7 +14,7 @@ public struct HTMLTemplate {
         <html lang="en" data-theme="\(theme)">
         <head>
         <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes">
         <title>\(escapedTitle)</title>
         <link rel="stylesheet" href="styles.css">
         <link rel="stylesheet" id="hljs-theme" href="\(hljsTheme)">

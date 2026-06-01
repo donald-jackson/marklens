@@ -9,7 +9,7 @@
     --blockquote-bg: #fafafa;
     --blockquote-border: #d2d2d7;
     --table-stripe: #fafafa;
-    --content-width: 760px;
+    --content-width: none;
     --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
     --font-mono: ui-monospace, "SF Mono", Menlo, Monaco, "Courier New", monospace;
 }
@@ -44,7 +44,7 @@ html, body {
 article#content {
     max-width: var(--content-width);
     margin: 0 auto;
-    padding: 48px 32px 96px;
+    padding: 48px 56px 96px;
     word-wrap: break-word;
 }
 

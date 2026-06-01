@@ -12,7 +12,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     let rendered: RenderedDocument
     let dark: Bool
     let baseURL: URL?
-    let exportController: ExportController
+    let controller: WebViewController
 
     #if os(macOS)
     func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
@@ -32,14 +32,15 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
-        context.coordinator.exportController = exportController
-        exportController.webView = webView
+        context.coordinator.controller = controller
+        controller.webView = webView
         // Enable Web Inspector (Cmd+Opt+I) so devs can debug the rendered page.
         if webView.responds(to: Selector(("setInspectable:"))) {
             webView.perform(Selector(("setInspectable:")), with: true)
         }
         #if os(macOS)
         webView.setValue(false, forKey: "drawsBackground")
+        webView.allowsMagnification = true  // trackpad pinch-to-zoom
         #else
         webView.isOpaque = false
         webView.backgroundColor = .clear
@@ -84,10 +85,10 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var lastBody: String = ""
         var lastMermaid: Bool = false
         var lastDark: Bool = false
-        weak var exportController: ExportController?
+        weak var controller: WebViewController?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            Task { @MainActor in self.exportController?.isReady = true }
+            Task { @MainActor in self.controller?.isReady = true }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

@@ -7,20 +7,48 @@ import AppKit
 
 struct Toolbar: ToolbarContent {
     let fileURL: URL?
-    @ObservedObject var exportController: ExportController
+    @ObservedObject var controller: WebViewController
 
     @State private var iOSExportURL: URL?
     @State private var isExporting = false
 
     var body: some ToolbarContent {
         #if os(macOS)
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                controller.zoomOut()
+            } label: {
+                Label("Zoom Out", systemImage: "minus.magnifyingglass")
+            }
+            .disabled(!controller.isReady)
+            .help("Zoom out")
+            .keyboardShortcut("-", modifiers: .command)
+
+            Button {
+                controller.zoomIn()
+            } label: {
+                Label("Zoom In", systemImage: "plus.magnifyingglass")
+            }
+            .disabled(!controller.isReady)
+            .help("Zoom in")
+            .keyboardShortcut("=", modifiers: .command)
+
+            Button {
+                controller.resetZoom()
+            } label: {
+                Label("Actual Size", systemImage: "1.magnifyingglass")
+            }
+            .disabled(!controller.isReady)
+            .help("Actual size")
+            .keyboardShortcut("0", modifiers: .command)
+        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 Task { await exportPDFOnMac() }
             } label: {
                 Label("Export as PDF", systemImage: "square.and.arrow.up.on.square")
             }
-            .disabled(!exportController.isReady || isExporting)
+            .disabled(!controller.isReady || isExporting)
             .help("Export the rendered document as a PDF")
             .keyboardShortcut("e", modifiers: [.command, .shift])
         }
@@ -40,7 +68,7 @@ struct Toolbar: ToolbarContent {
             } label: {
                 Label("Export as PDF", systemImage: "square.and.arrow.up.on.square")
             }
-            .disabled(!exportController.isReady)
+            .disabled(!controller.isReady)
         }
         ToolbarItem(placement: .primaryAction) {
             if let url = iOSExportURL {
@@ -69,7 +97,7 @@ struct Toolbar: ToolbarContent {
         defer { isExporting = false }
 
         do {
-            let data = try await exportController.exportPDF()
+            let data = try await controller.exportPDF()
 
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.pdf]
@@ -98,7 +126,7 @@ struct Toolbar: ToolbarContent {
     @MainActor
     private func prepareIOSExport() async {
         do {
-            let data = try await exportController.exportPDF()
+            let data = try await controller.exportPDF()
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent(suggestedName)
             try data.write(to: url, options: .atomic)
