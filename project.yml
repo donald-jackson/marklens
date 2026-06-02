@@ -29,6 +29,10 @@ targets:
       - path: Marklens
     settings:
       base:
+        # Pin PRODUCT_NAME so Xcode's Display Name field can't sneak a
+        # space or colon into the .app bundle folder name. The
+        # user-facing name lives in Info.plist CFBundleDisplayName.
+        PRODUCT_NAME: Marklens
         PRODUCT_BUNDLE_IDENTIFIER: solutions.ddj.marklens
         INFOPLIST_FILE: Marklens/Info.plist
         CODE_SIGN_ENTITLEMENTS: Marklens/Marklens.entitlements
@@ -49,6 +53,7 @@ targets:
       - path: MarklensQuickLook
     settings:
       base:
+        PRODUCT_NAME: MarklensQuickLook
         PRODUCT_BUNDLE_IDENTIFIER: solutions.ddj.marklens.QuickLook
         INFOPLIST_FILE: MarklensQuickLook/Info.plist
         CODE_SIGN_ENTITLEMENTS: MarklensQuickLook/MarklensQuickLook.entitlements
