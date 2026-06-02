@@ -1,3 +1,8 @@
+---
+title: Marklens Privacy Policy
+permalink: /privacy/
+---
+
 # Marklens Privacy Policy
 
 _Last updated: 2026-06-02_
@@ -28,7 +33,8 @@ children under 13.
 ## Changes to this policy
 
 If this policy ever changes, the updated version will be posted at
-<https://ddj.solutions/marklens/privacy> with a new "Last updated" date.
+<https://donald-jackson.github.io/marklens/privacy/> with a new "Last
+updated" date.
 
 ## Contact
 
