@@ -142,6 +142,27 @@ All "No" answers. Final rating: **4+**.
 
 ---
 
+## Copyright
+
+App Store Connect → **App Information** → **General Information** → **Copyright** field:
+
+```
+© 2026 Donald Jackson
+```
+
+Apple's preferred format for individual developers is `© <year> <name>` (the year the app was first published, not the current year — leave it as `2026` for the entire 1.x lifecycle). This string appears at the bottom of the App Store listing under "Information".
+
+The matching `NSHumanReadableCopyright` value in `Marklens/Info.plist` is what macOS shows in **Marklens → About Marklens**:
+
+```xml
+<key>NSHumanReadableCopyright</key>
+<string>© 2026 Donald Jackson. MIT-licensed.</string>
+```
+
+The "MIT-licensed" tail is optional but useful for open-source apps — it signals the licensing without requiring users to find LICENSE on GitHub.
+
+---
+
 ## Pricing & availability
 
 - **Price**: Free
