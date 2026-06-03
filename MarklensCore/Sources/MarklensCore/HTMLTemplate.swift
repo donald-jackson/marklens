@@ -19,6 +19,7 @@ public struct HTMLTemplate {
         <link rel="stylesheet" href="styles.css">
         <link rel="stylesheet" id="hljs-theme" href="\(hljsTheme)">
         <script src="highlight.min.js" defer></script>
+        <script src="find.js" defer></script>
         \(mermaidTag)
         </head>
         <body>

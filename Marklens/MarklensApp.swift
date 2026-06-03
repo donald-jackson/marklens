@@ -9,6 +9,9 @@ struct MarklensApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}  // viewer only — no "New"
             #if os(macOS)
+            CommandGroup(after: .textEditing) {
+                FindMenuCommands()
+            }
             CommandGroup(replacing: .help) {
                 HelpMenuCommands()
             }
@@ -62,4 +65,41 @@ private struct HelpMenuCommands: View {
         .keyboardShortcut("?", modifiers: .command)
     }
 }
+
+private struct FindMenuCommands: View {
+    @FocusedValue(\.findController) private var findController
+
+    var body: some View {
+        Button("Find…") {
+            findController?.show()
+        }
+        .keyboardShortcut("f", modifiers: .command)
+        .disabled(findController == nil)
+
+        Button("Find Next") {
+            guard let fc = findController else { return }
+            Task { await fc.next() }
+        }
+        .keyboardShortcut("g", modifiers: .command)
+        .disabled(findController == nil)
+
+        Button("Find Previous") {
+            guard let fc = findController else { return }
+            Task { await fc.previous() }
+        }
+        .keyboardShortcut("g", modifiers: [.command, .shift])
+        .disabled(findController == nil)
+    }
+}
 #endif
+
+private struct FindControllerFocusKey: FocusedValueKey {
+    typealias Value = FindController
+}
+
+extension FocusedValues {
+    var findController: FindController? {
+        get { self[FindControllerFocusKey.self] }
+        set { self[FindControllerFocusKey.self] = newValue }
+    }
+}

@@ -8,6 +8,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var rendered: RenderedDocument?
     @StateObject private var webController = WebViewController()
+    @StateObject private var findController = FindController()
 
     var body: some View {
         Group {
@@ -22,13 +23,25 @@ struct ContentView: View {
                 Color.clear
             }
         }
+        .overlay(alignment: .top) {
+            if findController.isActive {
+                FindBar(controller: findController)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: findController.isActive)
         #if os(macOS)
         .frame(minWidth: 480, minHeight: 360)
         #endif
         .navigationTitle(fileURL?.deletingPathExtension().lastPathComponent ?? "Markdown")
-        .toolbar { Toolbar(fileURL: fileURL, controller: webController) }
+        .toolbar { Toolbar(fileURL: fileURL, controller: webController, findController: findController) }
+        .focusedSceneValue(\.findController, findController)
         .task(id: document.source) {
+            findController.hide()
             await render()
+        }
+        .onChange(of: webController.isReady) { _, ready in
+            if ready { findController.webView = webController.webView }
         }
     }
 

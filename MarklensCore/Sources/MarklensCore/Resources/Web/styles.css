@@ -196,3 +196,24 @@ aside[data-kind]::before {
 html, body, article, pre, code, blockquote, table, th, td, aside {
     transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
+
+/* Find-in-document highlights */
+mark.ml-find {
+    background: #fff3a8;
+    color: inherit;
+    padding: 0;
+    border-radius: 2px;
+}
+mark.ml-find-current {
+    background: #ffa940;
+    outline: 2px solid #c97a00;
+    outline-offset: 1px;
+}
+[data-theme="dark"] mark.ml-find {
+    background: rgba(255, 215, 0, 0.35);
+    color: inherit;
+}
+[data-theme="dark"] mark.ml-find-current {
+    background: rgba(255, 165, 0, 0.65);
+    outline: 2px solid rgba(255, 200, 80, 0.9);
+}

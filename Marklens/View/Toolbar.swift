@@ -10,12 +10,23 @@ import UIKit
 struct Toolbar: ToolbarContent {
     let fileURL: URL?
     @ObservedObject var controller: WebViewController
+    @ObservedObject var findController: FindController
 
     @State private var iOSExportURL: URL?
     @State private var isExporting = false
 
     var body: some ToolbarContent {
         #if os(macOS)
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                findController.isActive.toggle()
+            } label: {
+                Label("Find", systemImage: "magnifyingglass")
+            }
+            .disabled(!controller.isReady)
+            .help("Find in document (⌘F)")
+            .keyboardShortcut("f", modifiers: .command)
+        }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
                 controller.zoomOut()
@@ -64,6 +75,15 @@ struct Toolbar: ToolbarContent {
             .help("Show this file in Finder")
         }
         #else
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                findController.isActive.toggle()
+            } label: {
+                Label("Find", systemImage: "magnifyingglass")
+            }
+            .disabled(!controller.isReady)
+            .keyboardShortcut("f", modifiers: .command)
+        }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 Task { await prepareIOSExport() }

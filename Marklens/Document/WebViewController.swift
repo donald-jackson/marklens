@@ -23,6 +23,11 @@ final class WebViewController: ObservableObject {
     func exportPDF() async throws -> Data {
         guard let webView else { throw ExportError.notReady }
 
+        // Strip any in-page find highlights so they don't bake into the PDF.
+        _ = try? await webView.evaluateJavaScript(
+            "window.__marklensFind && window.__marklensFind.clear();"
+        )
+
         // On iPhone the visible WebView is ~400 pt wide. The PDF
         // capture rect can be wider, but content is laid out at the
         // viewport width — so a wider rect just gave us 400 pt of
