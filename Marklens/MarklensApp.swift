@@ -9,6 +9,9 @@ struct MarklensApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}  // viewer only — no "New"
             #if os(macOS)
+            CommandGroup(after: .newItem) {
+                ReloadMenuCommands()
+            }
             CommandGroup(after: .textEditing) {
                 FindMenuCommands()
             }
@@ -48,6 +51,24 @@ private struct HelpMenuCommands: View {
     }
 }
 
+private struct ReloadMenuCommands: View {
+    @FocusedValue(\.documentReloader) private var reloader
+
+    var body: some View {
+        Button("Reload") {
+            reloader?.reload()
+        }
+        .keyboardShortcut("r", modifiers: .command)
+        .disabled(reloader?.canReload != true)
+
+        Toggle("Auto-Reload on Change", isOn: Binding(
+            get: { reloader?.autoReloadEnabled ?? false },
+            set: { reloader?.autoReloadEnabled = $0 }
+        ))
+        .disabled(reloader == nil)
+    }
+}
+
 private struct FindMenuCommands: View {
     @FocusedValue(\.findController) private var findController
 
@@ -79,9 +100,18 @@ private struct FindControllerFocusKey: FocusedValueKey {
     typealias Value = FindController
 }
 
+private struct DocumentReloaderFocusKey: FocusedValueKey {
+    typealias Value = DocumentReloader
+}
+
 extension FocusedValues {
     var findController: FindController? {
         get { self[FindControllerFocusKey.self] }
         set { self[FindControllerFocusKey.self] = newValue }
+    }
+
+    var documentReloader: DocumentReloader? {
+        get { self[DocumentReloaderFocusKey.self] }
+        set { self[DocumentReloaderFocusKey.self] = newValue }
     }
 }

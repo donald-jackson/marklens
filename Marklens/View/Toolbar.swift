@@ -11,6 +11,7 @@ struct Toolbar: ToolbarContent {
     let fileURL: URL?
     @ObservedObject var controller: WebViewController
     @ObservedObject var findController: FindController
+    @ObservedObject var reloader: DocumentReloader
 
     @State private var isExporting = false
 
@@ -71,6 +72,9 @@ struct Toolbar: ToolbarContent {
             .disabled(fileURL == nil)
             .help("Show this file in Finder")
         }
+        ToolbarItem(placement: .primaryAction) {
+            reloadButton
+        }
         #else
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -86,6 +90,9 @@ struct Toolbar: ToolbarContent {
         }
         ToolbarItem(placement: .primaryAction) {
             exportPDFMenu
+        }
+        ToolbarItem(placement: .primaryAction) {
+            reloadButton
         }
         #endif
     }
@@ -135,6 +142,30 @@ struct Toolbar: ToolbarContent {
         .disabled(!controller.isReady || isExporting)
         #if os(macOS)
         .help("Export the rendered document as a PDF")
+        #endif
+    }
+
+    /// Re-read the file from disk. Emphasized with a filled glyph when the
+    /// on-disk copy has changed but auto-reload is off, so the view's staleness
+    /// is visible at a glance.
+    @ViewBuilder
+    private var reloadButton: some View {
+        Button {
+            reloader.reload()
+        } label: {
+            Label(
+                "Reload",
+                systemImage: reloader.hasExternalChanges
+                    ? "arrow.clockwise.circle.fill"
+                    : "arrow.clockwise"
+            )
+        }
+        .disabled(!reloader.canReload)
+        #if os(macOS)
+        .help(reloader.hasExternalChanges
+              ? "This file changed on disk — reload to update (⌘R)"
+              : "Reload this file from disk (⌘R)")
+        .keyboardShortcut("r", modifiers: .command)
         #endif
     }
 
