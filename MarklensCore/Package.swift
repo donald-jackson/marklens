@@ -25,10 +25,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MarklensCoreTests",
-            dependencies: ["MarklensCore"],
-            resources: [
-                .copy("Fixtures"),
-            ]
+            dependencies: ["MarklensCore"]
         ),
     ]
 )
