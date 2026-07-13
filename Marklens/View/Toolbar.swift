@@ -12,7 +12,6 @@ struct Toolbar: ToolbarContent {
     @ObservedObject var controller: WebViewController
     @ObservedObject var findController: FindController
 
-    @State private var iOSExportURL: URL?
     @State private var isExporting = false
 
     var body: some ToolbarContent {
@@ -56,14 +55,10 @@ struct Toolbar: ToolbarContent {
             .keyboardShortcut("0", modifiers: .command)
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                Task { await exportPDFOnMac() }
-            } label: {
-                Label("Export as PDF", systemImage: "square.and.arrow.up.on.square")
-            }
-            .disabled(!controller.isReady || isExporting)
-            .help("Export the rendered document as a PDF")
-            .keyboardShortcut("e", modifiers: [.command, .shift])
+            exportMarkdownButton
+        }
+        ToolbarItem(placement: .primaryAction) {
+            exportPDFMenu
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -85,21 +80,59 @@ struct Toolbar: ToolbarContent {
             .keyboardShortcut("f", modifiers: .command)
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                Task { await prepareIOSExport() }
-            } label: {
-                Label("Export as PDF", systemImage: "square.and.arrow.up.on.square")
-            }
-            .disabled(!controller.isReady)
+            exportMarkdownButton
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                Task { await presentShareSheet() }
-            } label: {
-                Label("Share", systemImage: "square.and.arrow.up")
-            }
-            .disabled(fileURL == nil && iOSExportURL == nil)
+            exportPDFMenu
         }
+        #endif
+    }
+
+    // MARK: Export
+
+    /// Sends the Markdown file itself somewhere — Mail, Messages, AirDrop.
+    /// Deliberately *not* a save-to-file: the file already exists on disk, and
+    /// on iOS the share sheet is the only way out of the app anyway.
+    @ViewBuilder
+    private var exportMarkdownButton: some View {
+        Button {
+            Task { await shareMarkdown() }
+        } label: {
+            Label("Export Markdown", systemImage: "square.and.arrow.up")
+        }
+        .disabled(fileURL == nil)
+        #if os(macOS)
+        .help("Send this Markdown file to another app or person")
+        #endif
+    }
+
+    /// PDF is a *new* file, so it gets both destinations: hand it to someone
+    /// (share) or put it somewhere (save). A dropdown keeps the distinction
+    /// explicit instead of guessing which one was meant — the old single button
+    /// silently did both, and then leaked the exported PDF into the Share
+    /// action so sharing the document sent a PDF instead of the Markdown.
+    @ViewBuilder
+    private var exportPDFMenu: some View {
+        Menu {
+            Button {
+                Task { await sharePDF() }
+            } label: {
+                Label("Share…", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                Task { await savePDF() }
+            } label: {
+                Label("Save to File…", systemImage: "folder")
+            }
+            #if os(macOS)
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            #endif
+        } label: {
+            Label("Export PDF", systemImage: "arrow.up.doc")
+        }
+        .disabled(!controller.isReady || isExporting)
+        #if os(macOS)
+        .help("Export the rendered document as a PDF")
         #endif
     }
 
@@ -108,9 +141,43 @@ struct Toolbar: ToolbarContent {
         return "\(stem).pdf"
     }
 
+    /// Renders the current page to a PDF in our temp dir. Always produced fresh
+    /// — never cached — so it can't go stale against the document on screen
+    /// (which, since links now navigate in place on iOS, can change).
+    @MainActor
+    private func renderPDF() async -> URL? {
+        guard !isExporting else { return nil }
+        isExporting = true
+        defer { isExporting = false }
+        do {
+            let data = try await controller.exportPDF()
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(suggestedName)
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            await reportExportFailure(error)
+            return nil
+        }
+    }
+
+    // MARK: - macOS
+
     #if os(macOS)
     @MainActor
-    private func exportPDFOnMac() async {
+    private func shareMarkdown() async {
+        guard let fileURL else { return }
+        presentSharingPicker(for: [fileURL])
+    }
+
+    @MainActor
+    private func sharePDF() async {
+        guard let pdf = await renderPDF() else { return }
+        presentSharingPicker(for: [pdf])
+    }
+
+    @MainActor
+    private func savePDF() async {
         guard !isExporting else { return }
         isExporting = true
         defer { isExporting = false }
@@ -128,53 +195,58 @@ struct Toolbar: ToolbarContent {
             guard response == .OK, let url = panel.url else { return }
             try data.write(to: url)
         } catch {
-            await presentAlert(error: error)
+            await reportExportFailure(error)
         }
     }
 
+    /// Anchors the share picker under the toolbar, on the trailing side where
+    /// the export buttons live.
     @MainActor
-    private func presentAlert(error: Error) async {
+    private func presentSharingPicker(for items: [Any]) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+              let view = window.contentView
+        else { return }
+        let picker = NSSharingServicePicker(items: items)
+        let anchor = NSRect(x: view.bounds.maxX - 90, y: view.bounds.maxY - 1, width: 1, height: 1)
+        picker.show(relativeTo: anchor, of: view, preferredEdge: .minY)
+    }
+
+    @MainActor
+    private func reportExportFailure(_ error: Error) async {
         let alert = NSAlert()
         alert.messageText = "Couldn't export PDF"
-        alert.informativeText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        alert.informativeText = (error as? LocalizedError)?.errorDescription
+            ?? error.localizedDescription
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         _ = alert.runModal()
     }
-    #else
+    #endif
+
+    // MARK: - iOS
+
+    #if os(iOS)
     @MainActor
-    private func prepareIOSExport() async {
-        do {
-            let data = try await controller.exportPDF()
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent(suggestedName)
-            try data.write(to: url, options: .atomic)
-            iOSExportURL = url
-            // Hand the freshly-exported PDF straight to the share sheet so
-            // tapping Export-as-PDF surfaces something useful in one tap.
-            presentActivity(for: url)
-        } catch {
-            iOSExportURL = nil
-        }
+    private func shareMarkdown() async {
+        guard let original = fileURL, let copy = await copyForSharing(original) else { return }
+        IOSPresenter.share(copy)
     }
 
-    /// Presents the system share sheet with the most relevant item:
-    /// the just-exported PDF if one exists, otherwise a copy of the
-    /// original markdown file made in our own tmp dir (so the system
-    /// share sheet doesn't trip on the security-scoped DocumentGroup URL,
-    /// which is why `ShareLink(item: fileURL)` silently no-ops).
     @MainActor
-    private func presentShareSheet() async {
-        var url: URL?
-        if let pdf = iOSExportURL {
-            url = pdf
-        } else if let original = fileURL {
-            url = await copyForSharing(original)
-        }
-        guard let url else { return }
-        presentActivity(for: url)
+    private func sharePDF() async {
+        guard let pdf = await renderPDF() else { return }
+        IOSPresenter.share(pdf)
     }
 
+    @MainActor
+    private func savePDF() async {
+        guard let pdf = await renderPDF() else { return }
+        IOSPresenter.saveToFiles(pdf)
+    }
+
+    /// The share sheet trips over the security-scoped DocumentGroup URL — which
+    /// is why `ShareLink(item: fileURL)` silently no-ops — so hand it a copy in
+    /// our own temp dir instead.
     @MainActor
     private func copyForSharing(_ source: URL) async -> URL? {
         let didStart = source.startAccessingSecurityScopedResource()
@@ -193,29 +265,11 @@ struct Toolbar: ToolbarContent {
     }
 
     @MainActor
-    private func presentActivity(for url: URL) {
-        let av = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        guard let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
-              let root = scene.windows.first(where: \.isKeyWindow)?.rootViewController
-        else { return }
-        // Walk to the currently-presented controller so we don't try to
-        // present on something that already has a sheet up.
-        var presenter: UIViewController = root
-        while let next = presenter.presentedViewController { presenter = next }
-        // iPad needs a popover anchor — anchor to the top-right of the
-        // presenter's view so it points at the toolbar button.
-        if let popover = av.popoverPresentationController {
-            popover.sourceView = presenter.view
-            popover.sourceRect = CGRect(
-                x: presenter.view.bounds.maxX - 60,
-                y: presenter.view.bounds.minY + 60,
-                width: 1, height: 1
-            )
-            popover.permittedArrowDirections = .up
-        }
-        presenter.present(av, animated: true)
+    private func reportExportFailure(_ error: Error) async {
+        IOSPresenter.alert(
+            title: "Couldn't Export PDF",
+            message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        )
     }
     #endif
 }
