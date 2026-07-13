@@ -19,13 +19,15 @@ struct Toolbar: ToolbarContent {
         #if os(macOS)
         ToolbarItem(placement: .primaryAction) {
             Button {
-                findController.isActive.toggle()
+                findController.show()
             } label: {
                 Label("Find", systemImage: "magnifyingglass")
             }
             .disabled(!controller.isReady)
             .help("Find in document (⌘F)")
-            .keyboardShortcut("f", modifiers: .command)
+            // No .keyboardShortcut here: ⌘F is owned by the Find… menu
+            // command. Registering it twice makes SwiftUI pick a handler
+            // arbitrarily, which made find-bar focus behavior flaky.
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
@@ -77,7 +79,7 @@ struct Toolbar: ToolbarContent {
         #else
         ToolbarItem(placement: .primaryAction) {
             Button {
-                findController.isActive.toggle()
+                findController.show()
             } label: {
                 Label("Find", systemImage: "magnifyingglass")
             }

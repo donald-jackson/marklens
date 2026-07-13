@@ -65,12 +65,25 @@ struct FindBar: View {
         .shadow(color: .black.opacity(0.15), radius: 6, y: 2)
         .padding(.horizontal, 12)
         .padding(.top, 8)
-        .onAppear { focused = true }
+        .onAppear { requestFocus() }
+        .onChange(of: controller.focusToken) { _, _ in requestFocus() }
         .task(id: controller.query) {
             // Debounce typing so rapid keystrokes don't thrash the
             // TreeWalker on long documents.
             try? await Task.sleep(nanoseconds: 150_000_000)
             await controller.setQuery(controller.query)
+        }
+    }
+
+    /// Focus the query field. The bar animates in, so at onAppear time the
+    /// text field may not be in the window's responder chain yet — AppKit
+    /// silently drops focus requests to such views, and it also has to win
+    /// first responder away from the WKWebView. Re-assert once after the
+    /// transition (0.18s) has finished.
+    private func requestFocus() {
+        focused = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            focused = true
         }
     }
 }

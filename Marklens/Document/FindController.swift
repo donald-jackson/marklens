@@ -14,8 +14,14 @@ final class FindController: ObservableObject {
     @Published var currentIndex: Int = -1
     @Published var matchCount: Int = 0
 
+    /// Bumped on every show() so FindBar re-asserts keyboard focus even
+    /// when the bar is already visible (e.g. ⌘F after clicking into the
+    /// document, which hands first responder to the WKWebView).
+    @Published private(set) var focusToken: Int = 0
+
     func show() {
         isActive = true
+        focusToken &+= 1
     }
 
     func hide() {
