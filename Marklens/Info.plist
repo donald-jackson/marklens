@@ -28,6 +28,13 @@
     <string>public.app-category.productivity</string>
     <key>LSSupportsOpeningDocumentsInPlace</key>
     <true/>
+    <!-- DocumentGroup *is* a document-browser app, and iOS needs to be told so:
+         without this, "Open in Marklens" from another app launches us but never
+         completes the hand-off, dumping the user in the file browser instead of
+         the document they picked. Apple's own SwiftUI Document App template
+         sets this. Ignored on macOS. -->
+    <key>UISupportsDocumentBrowser</key>
+    <true/>
     <key>UIFileSharingEnabled</key>
     <true/>
     <key>UILaunchScreen</key>

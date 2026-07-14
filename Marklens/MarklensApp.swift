@@ -25,32 +25,14 @@ struct MarklensApp: App {
         .windowResizability(.contentSize)
         #endif
 
-        #if os(iOS)
-        // iPad/iPhone launch screen: small subtitle below "Marklens" so a
-        // first-run user knows to bring in a file (vs. expecting an editor).
-        // Anything placed in `actions` gets styled as a giant blue pill
-        // button — so the hint goes through `overlayAccessoryView` and is
-        // positioned manually under the title view.
-        DocumentGroupLaunchScene("Marklens") {
-            EmptyView()
-        } backgroundAccessoryView: { _ in
-            EmptyView()
-        } overlayAccessoryView: { proxy in
-            // proxy.titleViewFrame reports the title LAYOUT box, which is
-            // larger than the visible rounded card. We clamp the hint to
-            // the card width and place it just below the title glyphs via
-            // card.midY + small offset, where center matches the inside of
-            // the visible card on both iPhone and iPad.
-            let card = proxy.titleViewFrame
-            Text("Pick a Markdown file or share one to Marklens to view it.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: max(80, card.width * 0.78))
-                .position(x: card.midX, y: card.midY + 35)
-        }
-        #endif
+        // NOTE: no DocumentGroupLaunchScene here, deliberately. Declaring one
+        // (iOS 18) makes DocumentGroup silently DROP documents opened from
+        // outside the app: iOS delivers the file in the scene's connection
+        // options — verified — and SwiftUI shows the file browser instead of
+        // the document. Reproduced with `simctl openurl file://…`; removing the
+        // launch scene fixes it, and scene ordering makes no difference. The
+        // cost is the custom launch screen (big title + "pick a file" hint);
+        // "Open in Marklens" actually working is worth more.
     }
 }
 
