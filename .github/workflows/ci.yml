@@ -107,15 +107,17 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.app
 
-      # Xcode 16.0's bundled iOS 18.0 SDK has no exact-matching Simulator
-      # runtime pre-installed on the runner image (which only ships iOS
-      # 18.5/18.6/26.x runtimes) — actool fails the build with "No simulator
-      # runtime version ... available to use with iphonesimulator SDK
-      # version" without this. Downloads the runtime paired with whichever
-      # Xcode is currently selected, so it stays correct if the runner image's
-      # pre-installed runtimes change.
-      - name: Install matching iOS Simulator runtime
-        run: sudo xcodebuild -downloadPlatform iOS
+      - name: Diagnose SDK/runtime build versions
+        run: |
+          for app in /Applications/Xcode_1*.app /Applications/Xcode_2*.app; do
+            plist="$app/Contents/Developer/Platforms/iPhoneOS.platform/version.plist"
+            if [ -f "$plist" ]; then
+              build=$(/usr/libexec/PlistBuddy -c "Print :ProductBuildVersion" "$plist")
+              echo "$app -> iPhoneOS SDK build $build"
+            fi
+          done
+          echo "--- installed runtimes ---"
+          xcrun simctl list runtimes
 
       - name: Install XcodeGen
         run: brew install xcodegen
