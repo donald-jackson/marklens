@@ -20,22 +20,21 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Find latest successful macOS build on main
+      # Deliberately not `gh run list --status success`: ci.yml's build-macos
+      # and build-ios are independent jobs now, so a run's *overall* status is
+      # "failure" whenever iOS fails even if macOS succeeded and uploaded its
+      # artifact fine. Looking up the artifact directly makes the release
+      # depend only on the macOS build, matching the separated pipelines.
+      - name: Find latest macOS build artifact on main
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          run_id=$(gh run list \
-            --repo "$GITHUB_REPOSITORY" \
-            --workflow ci.yml \
-            --branch main \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq '.[0].databaseId')
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "marklens-macos-release" and .expired == false and .workflow_run.head_branch == "main")] | sort_by(.created_at) | (last // empty) | .workflow_run.id')
 
           if [ -z "$run_id" ]; then
-            echo "::error::No successful CI run found on main — nothing to attach to this release. Push to main (or re-run CI) and re-publish the release."
+            echo "::error::No marklens-macos-release artifact found for main — nothing to attach to this release. Push to main (or re-run the build-macos job) and re-publish the release."
             exit 1
           fi
 
