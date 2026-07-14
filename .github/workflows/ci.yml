@@ -107,6 +107,19 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.app
 
+      - name: Diagnose Xcode / Simulator runtimes
+        run: |
+          echo "--- Installed Xcode apps ---"
+          ls /Applications | grep -i xcode
+          echo "--- xcode-select -p ---"
+          xcode-select -p
+          echo "--- xcodebuild -version ---"
+          xcodebuild -version
+          echo "--- xcrun simctl list runtimes ---"
+          xcrun simctl list runtimes
+          echo "--- xcodebuild -showsdks ---"
+          xcodebuild -showsdks
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
