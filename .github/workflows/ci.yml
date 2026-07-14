@@ -104,24 +104,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Deliberately not pinned to a specific Xcode_X.Y.app like the macOS
+      # job: older pinned Xcode installs on this runner image only ship an
+      # iOS platform *stub* (SDK metadata with no matching Simulator runtime
+      # materialized), so any simulator build/list/boot fails with "iOS 18.0
+      # is not installed". `Xcode.app` is the image's default, which GitHub
+      # keeps paired with a fully-installed, working Simulator runtime.
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.app
-
-      - name: Diagnose SDK/runtime build versions
-        run: |
-          echo "--- default Xcode.app ---"
-          readlink -f /Applications/Xcode.app || true
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" /Applications/Xcode.app/Contents/Info.plist
-          echo "--- iPhoneSimulator SDK build per installed Xcode ---"
-          for app in /Applications/Xcode_1*.app /Applications/Xcode_2*.app; do
-            plist="$app/Contents/Developer/Platforms/iPhoneSimulator.platform/version.plist"
-            if [ -f "$plist" ]; then
-              build=$(/usr/libexec/PlistBuddy -c "Print :ProductBuildVersion" "$plist")
-              echo "$app -> iPhoneSimulator SDK build $build"
-            fi
-          done
-          echo "--- installed runtimes ---"
-          xcrun simctl list runtimes
+        run: sudo xcode-select -s /Applications/Xcode.app
 
       - name: Install XcodeGen
         run: brew install xcodegen
