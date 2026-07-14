@@ -7,10 +7,10 @@ on:
     branches: [main]
 
 jobs:
-  test-and-build:
-    name: Test + build
+  unit-tests:
+    name: MarklensCore unit tests
     runs-on: macos-15
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
@@ -24,6 +24,18 @@ jobs:
         run: |
           swift test --parallel
 
+  build-macos:
+    name: Build macOS
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -33,7 +45,7 @@ jobs:
       - name: Generate Xcode project
         run: ./scripts/generate-project.sh
 
-      - name: Build macOS app
+      - name: Build macOS app (Debug)
         run: |
           xcodebuild \
             -project Marklens.xcodeproj \
@@ -52,6 +64,57 @@ jobs:
             build \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGN_STYLE=Manual
+
+      # Release-config snapshot build of `main`, used to back the "attach
+      # latest main build" step in release.yml — see that workflow for why
+      # a fresh archive isn't built at release time. Ad-hoc signed (no
+      # Developer ID cert in CI): fine as a reference snapshot, but not a
+      # notarized artifact. Actual App Store submissions stay manual via
+      # Xcode Organizer.
+      - name: Build macOS app (Release snapshot for main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          xcodebuild \
+            -project Marklens.xcodeproj \
+            -scheme Marklens \
+            -destination 'platform=macOS' \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Manual \
+            build
+          ditto -c -k --sequesterRsrc --keepParent \
+            "build/Build/Products/Release/Marklens.app" \
+            Marklens-macOS.zip
+
+      - name: Upload macOS release snapshot
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: marklens-macos-release
+          path: Marklens-macOS.zip
+          retention-days: 90
+
+  build-ios:
+    name: Build iOS (Simulator)
+    runs-on: macos-15
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch bundled web assets
+        run: ./scripts/fetch-assets.sh
+
+      - name: Generate Xcode project
+        run: ./scripts/generate-project.sh
 
       - name: Build iOS Simulator app
         run: |
