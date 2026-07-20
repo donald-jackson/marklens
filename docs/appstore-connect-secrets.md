@@ -64,6 +64,8 @@ gh secret set CI_KEYCHAIN_PASSWORD --repo "$REPO" --body "$(openssl rand -base64
 
 Three profiles: the main app on each platform, plus the macOS-only QuickLook extension. Create these at [developer.apple.com/account/resources/profiles/list](https://developer.apple.com/account/resources/profiles/list) if they don't already exist — type **App Store**, matching App ID, signed with the Distribution cert from step 2 — then download each `.mobileprovision`/`.provisionprofile`.
 
+The QuickLook App ID (`solutions.ddj.marklens.QuickLook`) may not exist yet on the portal — it's never needed explicit registration before, since local builds use automatic signing. If profile creation can't find it, register it first: [developer.apple.com/account/resources/identifiers/list](https://developer.apple.com/account/resources/identifiers/list) → **+** → **App IDs** → **App** → description `MarklensQuickLook`, Bundle ID **Explicit** → `solutions.ddj.marklens.QuickLook` → enable **App Sandbox** under Capabilities (matches `MarklensQuickLook.entitlements`) → Register. Then create the profile as normal.
+
 | Profile | App ID | Platform |
 |---|---|---|
 | Marklens macOS App Store | `solutions.ddj.marklens` | macOS |
