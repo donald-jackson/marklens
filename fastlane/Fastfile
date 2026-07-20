@@ -117,6 +117,12 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     configuration: "Release",
     output_directory: "build/appstore",
     output_name: "Marklens",
+    # gym unconditionally validates its export as a zip-based .ipa; macOS
+    # App Store exports are a .pkg (XAR, not zip), which fails that check
+    # with a misleading "IPA invalid" even though xcodebuild's exportArchive
+    # already produced a correct, signed .pkg. iOS still needs the real
+    # ipa packaging/validation, so this only applies to the macOS lane.
+    skip_package_ipa: upload_platform == "osx",
     xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
     export_options: export_options
   )
