@@ -61,6 +61,23 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     keychain_name: KEYCHAIN_NAME,
     keychain_password: keychain_password
   )
+
+  # macOS App Store submissions ship as a signed .pkg installer, which needs
+  # a *separate* "Mac Installer Distribution" certificate beyond the
+  # "Apple Distribution" one that signs the .app itself — discovered via a
+  # live run failing with "No signing certificate 'Mac Installer
+  # Distribution' found". iOS has no installer step, so this only runs when
+  # the macOS lane provides the path.
+  installer_certificate_path = ENV["INSTALLER_CERTIFICATE_PATH"]
+  if installer_certificate_path
+    import_certificate(
+      certificate_path: installer_certificate_path,
+      certificate_password: ENV.fetch("INSTALLER_CERTIFICATE_PASSWORD"),
+      keychain_name: KEYCHAIN_NAME,
+      keychain_password: keychain_password
+    )
+  end
+
   profiles.each { |p| install_provisioning_profile(path: p[:profile_path]) }
 
   build_number = next_build_number(api_key)
@@ -76,6 +93,14 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     )
   end
 
+  export_options = {
+    method: "app-store",
+    teamID: TEAM_ID,
+    signingStyle: "manual",
+    provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
+  }
+  export_options[:installerSigningCertificate] = "Mac Installer Distribution" if installer_certificate_path
+
   build_app(
     project: "Marklens.xcodeproj",
     scheme: "Marklens",
@@ -84,12 +109,7 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     output_directory: "build/appstore",
     output_name: "Marklens",
     xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
-    export_options: {
-      method: "app-store",
-      teamID: TEAM_ID,
-      signingStyle: "manual",
-      provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
-    }
+    export_options: export_options
   )
 
   upload_to_testflight(

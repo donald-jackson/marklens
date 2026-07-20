@@ -51,11 +51,13 @@ jobs:
       - name: Decode signing credentials
         env:
           DISTRIBUTION_CERTIFICATE_P12_B64: ${{ secrets.DISTRIBUTION_CERTIFICATE_P12 }}
+          INSTALLER_CERTIFICATE_P12_B64: ${{ secrets.INSTALLER_CERTIFICATE_P12 }}
           PROVISIONING_PROFILE_MACOS_B64: ${{ secrets.PROVISIONING_PROFILE_MACOS }}
           PROVISIONING_PROFILE_QUICKLOOK_B64: ${{ secrets.PROVISIONING_PROFILE_QUICKLOOK }}
         run: |
           mkdir -p /tmp/appstore-secrets
           echo "$DISTRIBUTION_CERTIFICATE_P12_B64" | base64 --decode > /tmp/appstore-secrets/distribution.p12
+          echo "$INSTALLER_CERTIFICATE_P12_B64" | base64 --decode > /tmp/appstore-secrets/installer.p12
           echo "$PROVISIONING_PROFILE_MACOS_B64" | base64 --decode > /tmp/appstore-secrets/marklens-macos.provisionprofile
           echo "$PROVISIONING_PROFILE_QUICKLOOK_B64" | base64 --decode > /tmp/appstore-secrets/marklens-quicklook.provisionprofile
 
@@ -66,6 +68,8 @@ jobs:
           APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
           DISTRIBUTION_CERTIFICATE_PATH: /tmp/appstore-secrets/distribution.p12
           DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          INSTALLER_CERTIFICATE_PATH: /tmp/appstore-secrets/installer.p12
+          INSTALLER_CERTIFICATE_PASSWORD: ${{ secrets.INSTALLER_CERTIFICATE_PASSWORD }}
           CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
           PROVISIONING_PROFILE_MACOS_PATH: /tmp/appstore-secrets/marklens-macos.provisionprofile
           PROVISIONING_PROFILE_QUICKLOOK_PATH: /tmp/appstore-secrets/marklens-quicklook.provisionprofile
@@ -84,15 +88,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Deliberately not pinned to Xcode_16.app like the macOS job above:
-      # that specific install only ships an iOS-platform *stub* on this
-      # runner image (no matching Simulator/device platform support
-      # materialized) — see the "Deliberately not pinned" comment in
-      # ci.yml's build-ios job for the full story. Xcode.app (the runner's
-      # default) is the one GitHub keeps paired with a fully-installed
-      # platform.
+      # Neither Xcode_16.app (stub iOS platform on this runner, same issue
+      # as ci.yml's build-ios job) nor the runner's default Xcode.app
+      # (bundles an iOS 18.5-ish SDK) work here: a live upload attempt was
+      # rejected by App Store Connect with "All iOS and iPadOS apps must be
+      # built with the iOS 26 SDK or later, included in Xcode 26 or later".
+      # Xcode_26.2 bundles that SDK and (per the same runner image) has a
+      # genuinely materialized iOS 26 Simulator/device platform, not a stub.
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: sudo xcode-select -s /Applications/Xcode_26.2.app
 
       - name: Install XcodeGen
         run: brew install xcodegen

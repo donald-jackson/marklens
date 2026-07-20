@@ -4,7 +4,7 @@ title: App Store Connect CI secrets
 
 # App Store Connect CI secrets
 
-Setup guide for the credentials the `appstore.yml` GitHub Actions workflow needs to build, sign, and upload Marklens to App Store Connect for both macOS and iOS. Nine secrets total — do this once (and again whenever a cert/profile expires).
+Setup guide for the credentials the `appstore.yml` GitHub Actions workflow needs to build, sign, and upload Marklens to App Store Connect for both macOS and iOS. Eleven secrets total — do this once (and again whenever a cert/profile expires).
 
 Do this signed in as the account that manages App Store Connect for Marklens (`apple@ddj.solutions`), with Account Holder or Admin access on the `997P2237XV` team.
 
@@ -50,6 +50,19 @@ gh secret set DISTRIBUTION_CERTIFICATE_PASSWORD --repo "$REPO" --body "<the expo
 
 ---
 
+## 2b. Installer certificate (macOS only)
+
+Discovered via a live run failing with `No signing certificate "Mac Installer Distribution" found`: macOS App Store submissions ship as a signed `.pkg` installer, which needs a *separate* certificate from the one that signs the `.app` itself. iOS doesn't need this — there's no installer step.
+
+Xcode → Settings → Accounts → your Apple ID → **Manage Certificates** → **+** → **Mac Installer Distribution**. Export the same way as step 2 (select cert + key in Keychain Access → **Export 2 items…** → `.p12` + password).
+
+```bash
+base64 -i InstallerCert.p12 | tr -d '\n' | gh secret set INSTALLER_CERTIFICATE_P12 --repo "$REPO"
+gh secret set INSTALLER_CERTIFICATE_PASSWORD --repo "$REPO" --body "<the export password you set>"
+```
+
+---
+
 ## 3. CI keychain password
 
 Just a random string — protects the throwaway keychain fastlane creates on each CI run. Not tied to anything else; generate it once and forget it.
@@ -86,13 +99,15 @@ base64 -i MarklensQuickLook_AppStore.provisionprofile | tr -d '\n' | gh secret s
 gh secret list --repo "$REPO"
 ```
 
-You should see all 9 secrets:
+You should see all 11 secrets:
 
 - `APP_STORE_CONNECT_API_KEY_ID`
 - `APP_STORE_CONNECT_API_ISSUER_ID`
 - `APP_STORE_CONNECT_API_KEY_CONTENT`
 - `DISTRIBUTION_CERTIFICATE_P12`
 - `DISTRIBUTION_CERTIFICATE_PASSWORD`
+- `INSTALLER_CERTIFICATE_P12`
+- `INSTALLER_CERTIFICATE_PASSWORD`
 - `CI_KEYCHAIN_PASSWORD`
 - `PROVISIONING_PROFILE_MACOS`
 - `PROVISIONING_PROFILE_IOS`
@@ -104,6 +119,6 @@ You should see all 9 secrets:
 
 ## When this needs to be redone
 
-- **Distribution certificate**: expires yearly. CI will fail with a clear fastlane signing error when it does — regenerate and re-run step 2.
+- **Distribution / installer certificates**: expire yearly. CI will fail with a clear fastlane signing error when either does — regenerate and re-run step 2 or 2b.
 - **Provisioning profiles**: regenerate if the certificate they reference is revoked/replaced, or if a new capability/entitlement is added to the app. Re-run step 4 for the affected profile(s).
 - **API key**: doesn't expire on a fixed schedule, but can be revoked from the Integrations page — if that happens, regenerate and re-run step 1.
