@@ -14,6 +14,12 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions: {}
+
+concurrency:
+  group: appstore-connect
+  cancel-in-progress: false
+
 jobs:
   appstore-macos:
     name: App Store Connect (macOS)
