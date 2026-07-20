@@ -158,6 +158,40 @@ Store Connect. Plan:
    earlier in this project.
 4. Once clean, `release: published` becomes the standing trigger.
 
+**Verified live end-to-end on 2026-07-20.** Both `appstore-macos` and
+`appstore-ios` succeeded (App Store Connect app ID 6775853573), each
+confirmed with "Successfully uploaded the new binary to App Store
+Connect." Getting there surfaced several real issues no pre-secrets test
+could reach — each fixed and pushed to `main` during the live test:
+
+- QuickLook's App ID needed manual portal registration (never registered
+  before, since local builds use automatic signing) — now noted in
+  `docs/appstore-connect-secrets.md`.
+- The macOS and iOS main-app provisioning profiles were initially created
+  with swapped platforms on the portal (a profile named "...macOS App
+  Store" was actually iOS-typed, and vice versa) — a one-off setup mistake,
+  not a pipeline issue; re-created correctly.
+- `upload_to_testflight` needed `app_platform:`, not `platform:` (real
+  fastlane API inconsistency between that action and
+  `latest_testflight_build_number`, which does use `platform:`).
+- App Store Connect now requires the iOS 26 SDK — the `appstore-ios` job
+  pins `Xcode_26.2.app` rather than the runner's older default.
+- macOS App Store submissions need a second, distinct "Mac Installer
+  Distribution" certificate beyond "Apple Distribution" to sign the `.pkg`
+  installer — its actual keychain identity name doesn't match that label
+  (Apple issues it as "3rd Party Mac Developer Installer: ..."), so the
+  Fastfile looks it up dynamically after import rather than hardcoding it.
+- `MARKETING_VERSION` had to be bumped past the already-released `1.0.1`
+  — correct App Store Connect behavior, not a bug, but blocks any test
+  run against an already-shipped version.
+- gym's own macOS `.pkg` export/detection is broken in fastlane 2.231.1
+  (confirmed via an exhaustive filesystem search after an opaque "IPA
+  invalid" with no underlying xcodebuild error text). Worked around by
+  having `build_app` do only the archive
+  (`skip_package_ipa: true` for the macOS lane) and running
+  `xcodebuild -exportArchive` directly via `sh` for full, unfiltered
+  output — iOS is untouched and still uses gym's normal archive+export.
+
 ## Out of scope (for this design)
 
 - Auto-submitting builds for App Review (explicitly rejected above).
