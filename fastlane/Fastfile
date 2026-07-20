@@ -1,0 +1,141 @@
+default_platform(:ios)
+
+APP_IDENTIFIER = "solutions.ddj.marklens"
+QUICKLOOK_IDENTIFIER = "solutions.ddj.marklens.QuickLook"
+TEAM_ID = "997P2237XV"
+KEYCHAIN_NAME = "appstore-ci.keychain-db"
+
+# One build higher than the highest existing build across *both* platforms'
+# App Store Connect history. macOS and iOS share one CURRENT_PROJECT_VERSION
+# (one target, one Info.plist) — both lanes call this independently and
+# converge on the same number without needing to coordinate with each other,
+# since they're reading the same shared history.
+def next_build_number(api_key)
+  ios_build = latest_testflight_build_number(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: "ios"
+  ).to_i
+  mac_build = latest_testflight_build_number(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: "osx"
+  ).to_i
+  [ios_build, mac_build].max + 1
+end
+
+# Shared by both platform lanes below. `profiles` is an array of
+# { target:, bundle_id:, profile_name:, profile_path: } — one entry per
+# Xcode target that needs signing for this platform (macOS has two: the
+# main app and the QuickLook extension; iOS has just the main app).
+#
+# export_options[:provisioningProfiles] (used by `build_app` below) only
+# controls the *export* step (archive -> .app/.pkg or .ipa). The `archive`
+# step itself still builds under project.yml's CODE_SIGN_STYLE: Automatic
+# unless told otherwise — since we deliberately don't touch project.yml,
+# update_code_signing_settings flips each target to manual signing with its
+# specific profile directly in the generated .xcodeproj before the archive.
+def build_and_upload(destination:, profiles:, upload_platform:)
+  api_key = app_store_connect_api_key(
+    key_id: ENV.fetch("APP_STORE_CONNECT_API_KEY_ID"),
+    issuer_id: ENV.fetch("APP_STORE_CONNECT_API_ISSUER_ID"),
+    key_content: ENV.fetch("APP_STORE_CONNECT_API_KEY_CONTENT"),
+    is_key_content_base64: false
+  )
+
+  keychain_password = ENV.fetch("CI_KEYCHAIN_PASSWORD")
+  create_keychain(
+    name: KEYCHAIN_NAME,
+    password: keychain_password,
+    default_keychain: true,
+    unlock: true,
+    timeout: 1800,
+    lock_when_sleeps: false
+  )
+  import_certificate(
+    certificate_path: ENV.fetch("DISTRIBUTION_CERTIFICATE_PATH"),
+    certificate_password: ENV.fetch("DISTRIBUTION_CERTIFICATE_PASSWORD"),
+    keychain_name: KEYCHAIN_NAME,
+    keychain_password: keychain_password
+  )
+  profiles.each { |p| install_provisioning_profile(path: p[:profile_path]) }
+
+  build_number = next_build_number(api_key)
+  increment_build_number(build_number: build_number, xcodeproj: "Marklens.xcodeproj")
+
+  profiles.each do |p|
+    update_code_signing_settings(
+      path: "Marklens.xcodeproj",
+      use_automatic_signing: false,
+      team_id: TEAM_ID,
+      code_sign_identity: "Apple Distribution",
+      targets: [p[:target]],
+      profile_name: p[:profile_name]
+    )
+  end
+
+  build_app(
+    project: "Marklens.xcodeproj",
+    scheme: "Marklens",
+    destination: destination,
+    configuration: "Release",
+    output_directory: "build/appstore",
+    output_name: "Marklens",
+    export_options: {
+      method: "app-store",
+      teamID: TEAM_ID,
+      signingStyle: "manual",
+      provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
+    }
+  )
+
+  upload_to_testflight(
+    api_key: api_key,
+    app_identifier: APP_IDENTIFIER,
+    platform: upload_platform,
+    skip_submission: true,
+    skip_waiting_for_build_processing: true
+  )
+end
+
+platform :mac do
+  desc "Build and upload the macOS app to TestFlight processing"
+  lane :release do
+    build_and_upload(
+      destination: "generic/platform=macOS",
+      profiles: [
+        {
+          target: "Marklens",
+          bundle_id: APP_IDENTIFIER,
+          profile_name: "Marklens macOS App Store",
+          profile_path: ENV.fetch("PROVISIONING_PROFILE_MACOS_PATH")
+        },
+        {
+          target: "MarklensQuickLook",
+          bundle_id: QUICKLOOK_IDENTIFIER,
+          profile_name: "MarklensQuickLook macOS App Store",
+          profile_path: ENV.fetch("PROVISIONING_PROFILE_QUICKLOOK_PATH")
+        }
+      ],
+      upload_platform: "osx"
+    )
+  end
+end
+
+platform :ios do
+  desc "Build and upload the iOS app to TestFlight processing"
+  lane :release do
+    build_and_upload(
+      destination: "generic/platform=iOS",
+      profiles: [
+        {
+          target: "Marklens",
+          bundle_id: APP_IDENTIFIER,
+          profile_name: "Marklens iOS App Store",
+          profile_path: ENV.fetch("PROVISIONING_PROFILE_IOS_PATH")
+        }
+      ],
+      upload_platform: "ios"
+    )
+  end
+end
