@@ -63,12 +63,18 @@ def build_and_upload(destination:, profiles:, upload_platform:)
   )
 
   # macOS App Store submissions ship as a signed .pkg installer, which needs
-  # a *separate* "Mac Installer Distribution" certificate beyond the
-  # "Apple Distribution" one that signs the .app itself — discovered via a
-  # live run failing with "No signing certificate 'Mac Installer
-  # Distribution' found". iOS has no installer step, so this only runs when
-  # the macOS lane provides the path.
+  # a *separate* certificate beyond the "Apple Distribution" one that signs
+  # the .app itself — discovered via a live run failing with "No signing
+  # certificate 'Mac Installer Distribution' found". iOS has no installer
+  # step, so this only runs when the macOS lane provides the path.
+  #
+  # The certificate's actual common name doesn't match the "Mac Installer
+  # Distribution" label Xcode's UI uses for the certificate *type* — Apple
+  # issues it as "3rd Party Mac Developer Installer: ..." (a longstanding,
+  # widely-documented naming quirk) — so rather than hardcode a guess, look
+  # up whatever identity actually landed in the keychain after import.
   installer_certificate_path = ENV["INSTALLER_CERTIFICATE_PATH"]
+  installer_identity = nil
   if installer_certificate_path
     import_certificate(
       certificate_path: installer_certificate_path,
@@ -76,6 +82,9 @@ def build_and_upload(destination:, profiles:, upload_platform:)
       keychain_name: KEYCHAIN_NAME,
       keychain_password: keychain_password
     )
+    identity_line = sh("security find-identity -v -p basic | grep Installer || true").strip
+    UI.user_error!("No installer certificate identity found in keychain after import") if identity_line.empty?
+    installer_identity = identity_line[/"(.+)"/, 1]
   end
 
   profiles.each { |p| install_provisioning_profile(path: p[:profile_path]) }
@@ -99,7 +108,7 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     signingStyle: "manual",
     provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
   }
-  export_options[:installerSigningCertificate] = "Mac Installer Distribution" if installer_certificate_path
+  export_options[:installerSigningCertificate] = installer_identity if installer_identity
 
   build_app(
     project: "Marklens.xcodeproj",
