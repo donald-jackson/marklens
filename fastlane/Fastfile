@@ -102,41 +102,60 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     )
   end
 
-  # xcodebuild itself warns that "app-store" is deprecated in favor of
-  # "app-store-connect" — and gym appears to use this string, not just
-  # destination/platform, to decide how to locate its exported artifact.
-  # With "app-store" (the same literal value for both platforms), gym
-  # exported and signed the macOS .pkg correctly but then failed to find
-  # it, raising a misleading "IPA invalid". Matching Apple's current name
-  # fixed detection; iOS is unaffected (ipa lookup already worked either
-  # way) but switched too for consistency.
+  # "app-store-connect" is NOT a valid export_options[:method] — confirmed
+  # live: gym rejects it outright ("Unsupported export_method"), for BOTH
+  # platforms. The xcodebuild deprecation warning about that name was about
+  # something else entirely. Reverted to "app-store", the only value gym
+  # accepts that's also correct for both iOS and macOS App Store exports.
   export_options = {
-    method: "app-store-connect",
+    method: "app-store",
     teamID: TEAM_ID,
     signingStyle: "manual",
     provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
   }
   export_options[:installerSigningCertificate] = installer_identity if installer_identity
 
-  build_app(
-    project: "Marklens.xcodeproj",
-    scheme: "Marklens",
-    destination: destination,
-    configuration: "Release",
-    output_directory: "build/appstore",
-    output_name: "Marklens",
-    xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
-    export_options: export_options
-  )
-  sh("ls -la build/appstore/ 2>&1 || true")
+  # iOS: build_app finds and reports the .ipa correctly on its own. macOS:
+  # xcodebuild's own archive+export+sign genuinely succeeds (confirmed live
+  # — dSYM compression runs afterward, which only happens post-export), but
+  # gym then raises a spurious "IPA invalid" instead of registering where
+  # the .pkg landed — an apparent gap in this fastlane version's macOS
+  # .pkg handling. Rescue specifically that case and locate the .pkg
+  # ourselves rather than trust gym's (broken) bookkeeping for it.
+  pkg_path = nil
+  begin
+    build_app(
+      project: "Marklens.xcodeproj",
+      scheme: "Marklens",
+      destination: destination,
+      configuration: "Release",
+      output_directory: "build/appstore",
+      output_name: "Marklens",
+      xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
+      export_options: export_options
+    )
+  rescue => e
+    raise e unless upload_platform == "osx" && e.message.include?("IPA invalid")
+    UI.important("build_app raised the known spurious 'IPA invalid' for macOS — searching for the .pkg xcodebuild actually exported.")
+    sh("find build -iname '*.pkg' 2>&1 || true")
+    sh("find /var/folders -maxdepth 6 -iname '*.pkg' -newer Gemfile 2>/dev/null || true")
+    sh("find ~/Library/Developer/Xcode/Archives -iname '*.pkg' 2>&1 || true")
+  end
 
-  upload_to_testflight(
+  if upload_platform == "osx"
+    pkg_path = Dir.glob("build/appstore/**/*.pkg").first
+    UI.user_error!("No .pkg found after build_app — see the find output above for where xcodebuild actually put it.") unless pkg_path
+  end
+
+  upload_options = {
     api_key: api_key,
     app_identifier: APP_IDENTIFIER,
     app_platform: upload_platform,
     skip_submission: true,
     skip_waiting_for_build_processing: true
-  )
+  }
+  upload_options[:pkg] = pkg_path if pkg_path
+  upload_to_testflight(upload_options)
 end
 
 platform :mac do
