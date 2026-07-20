@@ -102,8 +102,16 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     )
   end
 
+  # xcodebuild itself warns that "app-store" is deprecated in favor of
+  # "app-store-connect" — and gym appears to use this string, not just
+  # destination/platform, to decide how to locate its exported artifact.
+  # With "app-store" (the same literal value for both platforms), gym
+  # exported and signed the macOS .pkg correctly but then failed to find
+  # it, raising a misleading "IPA invalid". Matching Apple's current name
+  # fixed detection; iOS is unaffected (ipa lookup already worked either
+  # way) but switched too for consistency.
   export_options = {
-    method: "app-store",
+    method: "app-store-connect",
     teamID: TEAM_ID,
     signingStyle: "manual",
     provisioningProfiles: profiles.to_h { |p| [p[:bundle_id], p[:profile_name]] }
@@ -117,29 +125,18 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     configuration: "Release",
     output_directory: "build/appstore",
     output_name: "Marklens",
-    # gym unconditionally validates its export as a zip-based .ipa; macOS
-    # App Store exports are a .pkg (XAR, not zip), which fails that check
-    # with a misleading "IPA invalid" even though xcodebuild's exportArchive
-    # already produced a correct, signed .pkg. iOS still needs the real
-    # ipa packaging/validation, so this only applies to the macOS lane.
-    skip_package_ipa: upload_platform == "osx",
     xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
     export_options: export_options
   )
+  sh("ls -la build/appstore/ 2>&1 || true")
 
-  upload_options = {
+  upload_to_testflight(
     api_key: api_key,
     app_identifier: APP_IDENTIFIER,
     app_platform: upload_platform,
     skip_submission: true,
     skip_waiting_for_build_processing: true
-  }
-  # skip_package_ipa above means gym never registers where the built
-  # artifact landed (that bookkeeping happens during the packaging step
-  # we're skipping), so upload_to_testflight has nothing to auto-detect for
-  # macOS — point it at the .pkg explicitly. iOS still auto-detects its ipa.
-  upload_options[:pkg] = "build/appstore/Marklens.pkg" if upload_platform == "osx"
-  upload_to_testflight(upload_options)
+  )
 end
 
 platform :mac do
