@@ -115,36 +115,50 @@ def build_and_upload(destination:, profiles:, upload_platform:)
   }
   export_options[:installerSigningCertificate] = installer_identity if installer_identity
 
-  # iOS: build_app finds and reports the .ipa correctly on its own. macOS:
-  # xcodebuild's own archive+export+sign genuinely succeeds (confirmed live
-  # — dSYM compression runs afterward, which only happens post-export), but
-  # gym then raises a spurious "IPA invalid" instead of registering where
-  # the .pkg landed — an apparent gap in this fastlane version's macOS
-  # .pkg handling. Rescue specifically that case and locate the .pkg
-  # ourselves rather than trust gym's (broken) bookkeeping for it.
+  # iOS: build_app (gym) archives, exports, and reports the .ipa in one
+  # step — this works correctly and stays as-is.
+  #
+  # macOS: gym's own export step for a Mac App Store .pkg is broken in this
+  # fastlane version — three live attempts confirmed xcodebuild's actual
+  # -exportArchive either isn't producing a file gym can find, or gym is
+  # swallowing the real error entirely (raises a bare "IPA invalid" with no
+  # underlying xcodebuild error text, and an exhaustive filesystem search
+  # afterward found no .pkg anywhere). Rather than keep guessing at gym's
+  # internals, let gym do only the archive (skip_package_ipa: true skips
+  # its export attempt entirely) and run `xcodebuild -exportArchive`
+  # ourselves via `sh`, which prints full, unfiltered xcodebuild output —
+  # no more black box.
   pkg_path = nil
-  begin
-    build_app(
-      project: "Marklens.xcodeproj",
-      scheme: "Marklens",
-      destination: destination,
-      configuration: "Release",
-      output_directory: "build/appstore",
-      output_name: "Marklens",
-      xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
-      export_options: export_options
-    )
-  rescue => e
-    raise e unless upload_platform == "osx" && e.message.include?("IPA invalid")
-    UI.important("build_app raised the known spurious 'IPA invalid' for macOS — searching for the .pkg xcodebuild actually exported.")
-    sh("find build -iname '*.pkg' 2>&1 || true")
-    sh("find /var/folders -maxdepth 6 -iname '*.pkg' -newer Gemfile 2>/dev/null || true")
-    sh("find ~/Library/Developer/Xcode/Archives -iname '*.pkg' 2>&1 || true")
-  end
+  build_app(
+    project: "Marklens.xcodeproj",
+    scheme: "Marklens",
+    destination: destination,
+    configuration: "Release",
+    output_directory: "build/appstore",
+    output_name: "Marklens",
+    skip_package_ipa: upload_platform == "osx",
+    xcargs: "CURRENT_PROJECT_VERSION=#{build_number}",
+    export_options: export_options
+  )
 
   if upload_platform == "osx"
-    pkg_path = Dir.glob("build/appstore/**/*.pkg").first
-    UI.user_error!("No .pkg found after build_app — see the find output above for where xcodebuild actually put it.") unless pkg_path
+    archive_path = Actions.lane_context[SharedValues::XCODEBUILD_ARCHIVE]
+    UI.user_error!("No XCODEBUILD_ARCHIVE in lane context after build_app") unless archive_path
+
+    require "plist"
+    export_path = File.expand_path("build/appstore-export")
+    FileUtils.rm_rf(export_path)
+    FileUtils.mkdir_p(export_path)
+    plist_path = File.expand_path("build/appstore-export-options.plist")
+    File.write(plist_path, Plist::Emit.dump(export_options.transform_keys(&:to_s)))
+
+    sh("xcodebuild -exportArchive " \
+       "-archivePath #{archive_path.shellescape} " \
+       "-exportPath #{export_path.shellescape} " \
+       "-exportOptionsPlist #{plist_path.shellescape}")
+
+    pkg_path = Dir.glob("#{export_path}/**/*.pkg").first
+    UI.user_error!("xcodebuild -exportArchive completed but produced no .pkg under #{export_path}") unless pkg_path
   end
 
   upload_options = {
