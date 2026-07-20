@@ -127,13 +127,19 @@ def build_and_upload(destination:, profiles:, upload_platform:)
     export_options: export_options
   )
 
-  upload_to_testflight(
+  upload_options = {
     api_key: api_key,
     app_identifier: APP_IDENTIFIER,
     app_platform: upload_platform,
     skip_submission: true,
     skip_waiting_for_build_processing: true
-  )
+  }
+  # skip_package_ipa above means gym never registers where the built
+  # artifact landed (that bookkeeping happens during the packaging step
+  # we're skipping), so upload_to_testflight has nothing to auto-detect for
+  # macOS — point it at the .pkg explicitly. iOS still auto-detects its ipa.
+  upload_options[:pkg] = "build/appstore/Marklens.pkg" if upload_platform == "osx"
+  upload_to_testflight(upload_options)
 end
 
 platform :mac do
