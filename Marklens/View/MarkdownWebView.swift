@@ -12,6 +12,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
     let rendered: RenderedDocument
     let dark: Bool
     let baseURL: URL?
+    let fileURL: URL?
     let controller: WebViewController
 
     #if os(macOS)
@@ -29,6 +30,14 @@ struct MarkdownWebView: PlatformViewRepresentable {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
+
+        // Serves document-relative `<img src>`/`<a href>` (rewritten to
+        // `marklens-asset:` by MarklensCore) from the folder the document
+        // lives in, instead of the bundled `Web/` dir that `baseURL` points at.
+        let assetHandler = AssetSchemeHandler()
+        assetHandler.documentFolder = fileURL?.deletingLastPathComponent()
+        config.setURLSchemeHandler(assetHandler, forURLScheme: AssetSchemeHandler.scheme)
+        context.coordinator.assetHandler = assetHandler
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -55,6 +64,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
     private func update(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.assetHandler?.documentFolder = fileURL?.deletingLastPathComponent()
         let html = HTMLTemplate.page(
             body: rendered.body,
             containsMermaid: rendered.containsMermaid,
@@ -91,6 +101,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
         var lastMermaid: Bool = false
         var lastDark: Bool = false
         weak var controller: WebViewController?
+        var assetHandler: AssetSchemeHandler?
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             Task { @MainActor in self.controller?.isReady = true }
@@ -106,7 +117,14 @@ struct MarkdownWebView: PlatformViewRepresentable {
                url.scheme == "about" || url.isFileURL {
                 decisionHandler(.allow); return
             }
-            // Anything user-initiated → open in default browser.
+            // A relative link in the document (rewritten to `marklens-asset:`
+            // by MarklensCore) — resolve it against the document's folder and
+            // open the target file (e.g. a sibling .md) instead of no-oping.
+            if navigationAction.navigationType == .linkActivated, url.scheme == AssetSchemeHandler.scheme {
+                openRelativeLink(url)
+                decisionHandler(.cancel); return
+            }
+            // Anything else user-initiated → open in default browser.
             if navigationAction.navigationType == .linkActivated {
                 #if os(macOS)
                 NSWorkspace.shared.open(url)
@@ -116,6 +134,29 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 decisionHandler(.cancel); return
             }
             decisionHandler(.allow)
+        }
+
+        private func openRelativeLink(_ url: URL) {
+            guard let folder = assetHandler?.documentFolder,
+                  let reference = DocumentAssetResolver.relativeReference(from: url),
+                  let target = DocumentAssetResolver.resolve(reference, in: folder)
+            else { return }
+            #if os(macOS)
+            NSWorkspace.shared.open(target)
+            #else
+            // `UIApplication.shared.open` on a bare file:// URL only succeeds
+            // if some installed app claims the target's UTI; there's no
+            // iOS equivalent of "reveal/open with default app" for a document
+            // living outside our own sandbox container. Best effort — most
+            // relative links point at another Markdown file we can't yet
+            // hand off to ourselves without a document-browser integration.
+            UIApplication.shared.open(target, options: [:]) { success in
+                guard !success else { return }
+                Task { @MainActor in
+                    IOSPresenter.alert(title: "Couldn't Open Link", message: "This link couldn't be opened.")
+                }
+            }
+            #endif
         }
     }
 }
