@@ -66,8 +66,9 @@ enum IOSPresenter {
         picker.allowsMultipleSelection = false
 
         let chosen: URL? = await withCheckedContinuation { continuation in
-            var delegate: FolderPickerDelegate!
-            delegate = FolderPickerDelegate(continuation: continuation) {
+            let delegate = FolderPickerDelegate(continuation: continuation)
+            delegate.onFinish = { [weak delegate] in
+                guard let delegate else { return }
                 activeFolderPickerDelegates.removeAll { $0 === delegate }
             }
             activeFolderPickerDelegates.append(delegate)
@@ -86,12 +87,11 @@ enum IOSPresenter {
 
 private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
     private let continuation: CheckedContinuation<URL?, Never>
-    private let onFinish: () -> Void
+    var onFinish: () -> Void = {}
     private var didResume = false
 
-    init(continuation: CheckedContinuation<URL?, Never>, onFinish: @escaping () -> Void) {
+    init(continuation: CheckedContinuation<URL?, Never>) {
         self.continuation = continuation
-        self.onFinish = onFinish
     }
 
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {

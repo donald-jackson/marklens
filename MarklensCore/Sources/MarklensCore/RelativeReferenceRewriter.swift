@@ -18,11 +18,13 @@ public enum RelativeReferenceRewriter {
 
     /// Rewrites every rewritable `src`/`href` attribute in `html`.
     public static func rewrite(_ html: String) -> String {
-        rewriteAttribute("src", in: rewriteAttribute("href", in: html))
+        rewriteAttribute(srcRegex, name: "src", in: rewriteAttribute(hrefRegex, name: "href", in: html))
     }
 
-    private static func rewriteAttribute(_ name: String, in html: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: "\(name)=\"([^\"]*)\"") else { return html }
+    private static let hrefRegex = try! NSRegularExpression(pattern: "href=\"([^\"]*)\"")
+    private static let srcRegex = try! NSRegularExpression(pattern: "src=\"([^\"]*)\"")
+
+    private static func rewriteAttribute(_ regex: NSRegularExpression, name: String, in html: String) -> String {
         let ns = html as NSString
         let fullRange = NSRange(location: 0, length: ns.length)
         var result = ""
