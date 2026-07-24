@@ -54,6 +54,7 @@ Multi-paragraph messages are fine and encouraged for non-trivial changes.
 | The HTML template (CSS injection, theme switching) | `MarklensCore/Sources/MarklensCore/HTMLTemplate.swift` + `Resources/Web/styles.css` |
 | Window chrome, toolbar | `Marklens/View/Toolbar.swift`, `Marklens/ContentView.swift` |
 | WebView config (sandbox, JS, navigation policy) | `Marklens/View/MarkdownWebView.swift` |
+| Relative image/link resolution (sandbox folder grant, `marklens-asset:` scheme) | `Marklens/Document/AssetSchemeHandler.swift`, `Marklens/Document/FolderAccessStore.swift`, `MarklensCore/Sources/MarklensCore/RelativeReferenceRewriter.swift` |
 | File handling / UTI registration | `Marklens/Info.plist`, `Marklens/Document/MarkdownDocument.swift` |
 | Quick Look | `MarklensQuickLook/` |
 | App icon | `design/icon.svg` (regenerate PNGs via the recipe in the README) |

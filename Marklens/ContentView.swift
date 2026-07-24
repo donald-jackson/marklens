@@ -24,6 +24,7 @@ struct ContentView: View {
                     rendered: rendered,
                     dark: colorScheme == .dark,
                     baseURL: WebResources.bundleURL,
+                    fileURL: fileURL,
                     controller: webController
                 )
             } else {

@@ -53,5 +53,60 @@ enum IOSPresenter {
         }
         presenter.present(activity, animated: true)
     }
+
+    /// Presents the Files picker restricted to folders so the user can grant
+    /// one-time access to `folder` when a relative image/link next to the
+    /// open document can't be read under the app's existing sandbox scope.
+    /// Returns a URL with an active security scope the caller must close, or
+    /// `nil` if presentation failed or the user cancelled.
+    static func requestFolderAccess(for folder: URL) async -> URL? {
+        guard let presenter = top() else { return nil }
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+        picker.directoryURL = folder
+        picker.allowsMultipleSelection = false
+
+        let chosen: URL? = await withCheckedContinuation { continuation in
+            let delegate = FolderPickerDelegate(continuation: continuation)
+            delegate.onFinish = { [weak delegate] in
+                guard let delegate else { return }
+                activeFolderPickerDelegates.removeAll { $0 === delegate }
+            }
+            activeFolderPickerDelegates.append(delegate)
+            picker.delegate = delegate
+            presenter.present(picker, animated: true)
+        }
+
+        guard let chosen, chosen.startAccessingSecurityScopedResource() else { return nil }
+        return chosen
+    }
+
+    /// Keeps folder-picker delegates alive for the lifetime of the picker
+    /// presentation — `UIDocumentPickerViewController.delegate` is `weak`.
+    private static var activeFolderPickerDelegates: [FolderPickerDelegate] = []
+}
+
+private final class FolderPickerDelegate: NSObject, UIDocumentPickerDelegate {
+    private let continuation: CheckedContinuation<URL?, Never>
+    var onFinish: () -> Void = {}
+    private var didResume = false
+
+    init(continuation: CheckedContinuation<URL?, Never>) {
+        self.continuation = continuation
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        finish(urls.first)
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        finish(nil)
+    }
+
+    private func finish(_ url: URL?) {
+        guard !didResume else { return }
+        didResume = true
+        continuation.resume(returning: url)
+        onFinish()
+    }
 }
 #endif
