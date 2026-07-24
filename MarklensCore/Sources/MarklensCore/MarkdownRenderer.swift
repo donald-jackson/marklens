@@ -11,7 +11,8 @@ public struct MarkdownRenderer {
         detector.visit(document)
 
         let rawHTML = HTMLFormatter.format(document, options: [.parseAsides])
-        let body = MermaidPostProcessor.transform(rawHTML)
+        let mermaidBody = MermaidPostProcessor.transform(rawHTML)
+        let body = RelativeReferenceRewriter.rewrite(mermaidBody)
 
         return RenderedDocument(body: body, containsMermaid: detector.found)
     }
