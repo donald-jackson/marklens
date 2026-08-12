@@ -1,82 +1,239 @@
 name: DMG
 
-# Fires when a GitHub Release is published. Packages the macOS build .zip
-# that release.yml attaches to that same release (see that workflow for why
-# it's downloaded rather than rebuilt) into a standard drag-to-Applications
-# .dmg, so users can also download a DMG from the release and just drag
-# Marklens.app into /Applications.
+# Builds the Developer ID signed, notarized, drag-to-Applications .dmg that
+# people install from outside the Mac App Store, and attaches it to a GitHub
+# Release (creating that release if it doesn't exist yet).
 #
-# Can also be run manually (workflow_dispatch) to (re)build the DMG for the
-# latest published release — it downloads the .zip directly from that
-# release's own assets, so it doesn't depend on any other job or workflow
-# run having succeeded first.
+# Deliberately self-contained — it builds the app from source rather than
+# reusing ci.yml's `marklens-macos-release` artifact or the .zip release.yml
+# attaches. Two reasons:
+#
+#   1. Both of those are ad-hoc signed (ci.yml passes CODE_SIGN_IDENTITY="-"),
+#      and an ad-hoc signature can't be notarized. On macOS 15 an unnotarized
+#      download isn't just a right-click-to-Open annoyance — it's commonly
+#      rejected outright as "damaged and can't be opened".
+#   2. Pulling the .zip off the release raced release.yml, which uploads that
+#      asset on the same `release: published` event. Earlier versions of this
+#      workflow failed on exactly that ordering, on top of failing outright
+#      because the repo had no releases at all.
+#
+# App Store submissions are untouched by this workflow: those stay on
+# appstore.yml / fastlane with the Apple Distribution certificate. The
+# Developer ID certificate this one signs with is a separate credential —
+# see docs/developer-id-secrets.md.
 on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Tag to build and attach the DMG to. If the tag doesn't exist yet it
+          is created from the branch you run this on, along with the release.
+          Leave blank to use the most recent existing release.
+        required: false
+        type: string
 
 permissions:
   contents: write
 
+# Two runs attaching to the same release would clobber each other's upload.
+concurrency:
+  group: dmg
+  cancel-in-progress: false
+
 jobs:
   build-dmg:
-    name: Build macOS DMG and attach to release
+    name: Build signed DMG and attach to release
     runs-on: macos-15
-    timeout-minutes: 15
+    timeout-minutes: 40
 
     steps:
-      # On a release event, use the release that triggered the workflow. On
-      # a manual run, fall back to the latest published release so this can
-      # be re-run standalone without needing a previous job/run to inspect.
-      - name: Determine target release
+      # fetch-depth: 0 so the tag resolution step below can check out the
+      # tagged commit rather than building whatever the dispatch ref points at.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine target tag
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ -n "$EVENT_TAG" ]; then
             tag="$EVENT_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
           else
-            tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+            # `gh release list`, not `gh release view`: the latter asks for the
+            # *latest* release and exits 1 with a bare "release not found" when
+            # the repo has none, which is how earlier runs of this workflow
+            # died 10 seconds in. This form yields an empty string instead, so
+            # the error below can actually explain what to do about it.
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 \
+              --json tagName -q '.[0].tagName // empty')
           fi
 
           if [ -z "$tag" ]; then
-            echo "::error::Could not determine a release to package — no latest release found."
+            echo "::error::No tag to build: this repo has no releases yet. Re-run this workflow from the Actions tab and pass a tag (e.g. v1.0.2) in the 'tag' input — the release will be created for you."
             exit 1
           fi
 
-          echo "Using release $tag"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            create=false
+          else
+            create=true
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            # Build the tagged commit, so the DMG matches the source the
+            # release actually points at.
+            git checkout --detach "refs/tags/$tag"
+            echo "Building tag $tag ($(git rev-parse --short HEAD))"
+          else
+            echo "Tag $tag doesn't exist yet — building $GITHUB_SHA; the tag will be created along with the release."
+          fi
+
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "create=$create" >> "$GITHUB_OUTPUT"
 
-      - name: Download macOS build from release assets
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Fetch bundled web assets
+        run: ./scripts/fetch-assets.sh
+
+      - name: Generate Xcode project
+        run: ./scripts/generate-project.sh
+
+      - name: Import Developer ID signing certificate
+        id: signing
         env:
-          GH_TOKEN: ${{ github.token }}
+          DEVELOPER_ID_CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
         run: |
-          gh release download "${{ steps.release.outputs.tag }}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'Marklens-macOS.zip' \
-            --dir dist
-
-      - name: Unpack Marklens.app
-        run: |
-          mkdir -p dmg-root
-          ditto -x -k dist/Marklens-macOS.zip dmg-root
-          if [ ! -d "dmg-root/Marklens.app" ]; then
-            echo "::error::Marklens.app not found after unzipping Marklens-macOS.zip"
+          if [ -z "$DEVELOPER_ID_CERTIFICATE_P12" ]; then
+            echo "::error::DEVELOPER_ID_CERTIFICATE_P12 is not set. This is a *Developer ID Application* certificate — a different certificate from the Apple Distribution one in DISTRIBUTION_CERTIFICATE_P12, which only works for App Store builds and cannot be notarized. See docs/developer-id-secrets.md for how to create and upload it."
             exit 1
           fi
 
-      # Standard "drag to Applications" DMG layout: the .app plus a symlink
-      # to /Applications in the same folder, imaged with hdiutil (built into
-      # macOS, no extra tooling required). Building the symlink and volume
-      # directly with hdiutil — rather than a Finder/AppleScript-based tool
-      # like create-dmg — avoids relying on a logged-in GUI session, which
-      # GitHub-hosted macOS runners don't provide.
-      - name: Create Applications symlink
-        run: ln -s /Applications dmg-root/Applications
+          keychain="$RUNNER_TEMP/dmg-signing.keychain-db"
+          p12="$RUNNER_TEMP/developer-id.p12"
+          echo "$DEVELOPER_ID_CERTIFICATE_P12" | base64 --decode > "$p12"
 
+          # No matching delete: GitHub-hosted runners are destroyed after the
+          # job. A self-hosted runner would need explicit cleanup here.
+          security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain"
+          security import "$p12" \
+            -k "$keychain" \
+            -P "$DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          # Without this, the first codesign call raises a GUI "allow access to
+          # this key?" prompt that nothing on a headless runner can answer, and
+          # the job hangs until it hits the timeout.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$CI_KEYCHAIN_PASSWORD" "$keychain" > /dev/null
+          # Prepend to the search list rather than replacing it, so codesign
+          # can resolve the identity by name.
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | grep "Developer ID Application" \
+            | head -1 \
+            | sed -E 's/.*"(.+)".*/\1/')
+          if [ -z "$identity" ]; then
+            echo "::error::The imported certificate contains no 'Developer ID Application' identity. Identities found are listed below — an 'Apple Distribution' or 'Apple Development' certificate will not work for notarized distribution."
+            security find-identity -v -p codesigning "$keychain"
+            exit 1
+          fi
+
+          echo "Signing identity: $identity"
+          echo "identity=$identity" >> "$GITHUB_OUTPUT"
+          rm -f "$p12"
+
+      # Signing happens as an explicit pass below rather than inside xcodebuild:
+      # project.yml sets CODE_SIGN_STYLE: Automatic, which can't resolve a
+      # Developer ID identity on a runner with no signed-in Xcode account, and
+      # flipping the generated project to manual signing (the way fastlane does
+      # for App Store builds) wants a provisioning profile per target. Developer
+      # ID with these entitlements — plain App Sandbox, no iCloud, no app
+      # groups — needs no profile at all, so building unsigned and signing by
+      # hand is both simpler and fully deterministic.
+      - name: Build macOS app (Release, unsigned)
+        run: |
+          xcodebuild \
+            -project Marklens.xcodeproj \
+            -scheme Marklens \
+            -destination 'platform=macOS' \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Sign app with Developer ID
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          app="build/Build/Products/Release/Marklens.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::$app not found after the Release build."
+            exit 1
+          fi
+
+          # --options runtime enables the hardened runtime, which notarization
+          # requires. --timestamp gets a secure timestamp from Apple, without
+          # which the signature stops validating the moment the certificate
+          # expires.
+          sign() {
+            codesign --force --timestamp --options runtime --sign "$IDENTITY" "$@"
+          }
+
+          # Sign inside-out: a bundle's signature seals its nested contents, so
+          # anything embedded has to be signed before the thing embedding it,
+          # or `codesign --verify --deep` rejects the result.
+          for nested in "$app"/Contents/Frameworks/*; do
+            [ -e "$nested" ] || continue
+            echo "Signing $nested"
+            sign "$nested"
+          done
+
+          ext="$app/Contents/PlugIns/MarklensQuickLook.appex"
+          if [ ! -d "$ext" ]; then
+            echo "::error::QuickLook extension not found at $ext — the bundle layout changed. Update this step; failing here is deliberate, because silently skipping it would ship an unsigned extension inside a signed app and notarization would reject the whole thing."
+            exit 1
+          fi
+          sign --entitlements MarklensQuickLook/MarklensQuickLook.entitlements "$ext"
+
+          sign --entitlements Marklens/Marklens.entitlements "$app"
+
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=4 "$app"
+
+      # Standard "drag to Applications" layout: the .app plus a symlink to
+      # /Applications in the same folder, imaged with hdiutil (built into
+      # macOS, no extra tooling). Building the volume with hdiutil rather than
+      # a Finder/AppleScript-driven tool like create-dmg avoids depending on a
+      # logged-in GUI session, which GitHub-hosted runners don't provide.
       - name: Build DMG
         run: |
+          rm -rf dmg-root
+          mkdir -p dmg-root
+          # ditto, not cp: preserves the signed bundle's symlinks and extended
+          # attributes exactly, so copying it doesn't invalidate the signature.
+          ditto "build/Build/Products/Release/Marklens.app" "dmg-root/Marklens.app"
+          ln -s /Applications dmg-root/Applications
+
           hdiutil create \
             -volname "Marklens" \
             -srcfolder dmg-root \
@@ -85,11 +242,81 @@ jobs:
             -ov \
             Marklens.dmg
 
+      - name: Sign DMG
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: codesign --force --timestamp --sign "$IDENTITY" Marklens.dmg
+
+      - name: Notarize and staple DMG
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
+        run: |
+          key="$RUNNER_TEMP/notary-key.p8"
+          # Written straight out, not base64-decoded: this secret holds the raw
+          # .p8 PEM text (the Fastfile reads it with is_key_content_base64:
+          # false). The trailing newline matters to the PEM parser.
+          printf '%s\n' "$APP_STORE_CONNECT_API_KEY_CONTENT" > "$key"
+
+          notary_args=(
+            --key "$key"
+            --key-id "$APP_STORE_CONNECT_API_KEY_ID"
+            --issuer "$APP_STORE_CONNECT_API_ISSUER_ID"
+          )
+
+          set +e
+          out=$(xcrun notarytool submit Marklens.dmg "${notary_args[@]}" --output-format json --wait)
+          rc=$?
+          set -e
+          echo "$out"
+
+          id=$(echo "$out" | jq -r '.id // empty')
+          status=$(echo "$out" | jq -r '.status // empty')
+
+          if [ "$rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            # `submit` only reports a one-word status; the actual per-binary
+            # rejection reasons live in the notary log, so print it before
+            # failing rather than leaving a bare "Invalid" in the output.
+            if [ -n "$id" ]; then
+              xcrun notarytool log "$id" "${notary_args[@]}" || true
+            fi
+            rm -f "$key"
+            echo "::error::Notarization failed (status: ${status:-unknown})"
+            exit 1
+          fi
+
+          # Staple the ticket into the .dmg so Gatekeeper can validate it
+          # offline. Without this, a first launch on a machine with no network
+          # is still blocked even though the app is notarized.
+          xcrun stapler staple Marklens.dmg
+          rm -f "$key"
+
+          xcrun stapler validate Marklens.dmg
+          # The check Gatekeeper actually performs on a downloaded disk image.
+          spctl --assess --type open --context context:primary-signature -vv Marklens.dmg
+
       - name: Attach DMG to release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          CREATE_RELEASE: ${{ steps.release.outputs.create }}
         run: |
-          gh release upload "${{ steps.release.outputs.tag }}" \
-            Marklens.dmg \
+          if [ "$CREATE_RELEASE" = "true" ]; then
+            # Created with GITHUB_TOKEN on purpose: GitHub does not re-trigger
+            # workflows from events raised by that token, so publishing here
+            # does NOT fire appstore.yml (a real TestFlight upload) or
+            # release.yml (which would attach ci.yml's ad-hoc signed .zip
+            # beside this notarized .dmg, giving people a broken alternative
+            # download). Publishing a release by hand from the GitHub UI does
+            # fire both — that's the App Store path, and it's meant to.
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$TAG" \
+              --generate-notes
+          fi
+
+          gh release upload "$TAG" Marklens.dmg \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
