@@ -67,7 +67,7 @@ gh workflow run dmg.yml --repo "$REPO" -f tag=v1.0.2
 gh run watch --repo "$REPO"
 ```
 
-Expect roughly 8–12 minutes: most of it is the Release build, plus 1–5 minutes waiting on Apple's notary service.
+Expect roughly **30 minutes**, and note where that time goes — measured on the first live run (`31609171674`): checkout through signed `.dmg` took 1m40s, and Apple's notary service took the other **28m30s**. Notary turnaround is highly variable and entirely out of our hands; the job's 40-minute timeout is sized for that, not for the build.
 
 ---
 
