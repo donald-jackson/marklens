@@ -1,0 +1,85 @@
+name: DMG
+
+# Fires when a GitHub Release is published. Packages the same macOS build
+# artifact that release.yml attaches as a .zip (see that workflow for why
+# it's downloaded rather than rebuilt) into a standard drag-to-Applications
+# .dmg, so users can also download a DMG from the release and just drag
+# Marklens.app into /Applications.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build-dmg:
+    name: Build macOS DMG and attach to release
+    runs-on: macos-15
+    timeout-minutes: 15
+
+    steps:
+      # Deliberately not `gh run list --status success` — see release.yml
+      # for why the artifact is looked up directly instead of by run status.
+      - name: Find latest macOS build artifact on main
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '[.artifacts[] | select(.name == "marklens-macos-release" and .expired == false and .workflow_run.head_branch == "main")] | sort_by(.created_at) | (last // empty) | .workflow_run.id')
+
+          if [ -z "$run_id" ]; then
+            echo "::error::No marklens-macos-release artifact found for main — nothing to package. Push to main (or re-run the build-macos job) and re-publish the release."
+            exit 1
+          fi
+
+          echo "Using CI run $run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS build artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ steps.find.outputs.run_id }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name marklens-macos-release \
+            --dir dist
+
+      - name: Unpack Marklens.app
+        run: |
+          mkdir -p dmg-root
+          ditto -x -k dist/Marklens-macOS.zip dmg-root
+          if [ ! -d "dmg-root/Marklens.app" ]; then
+            echo "::error::Marklens.app not found after unzipping Marklens-macOS.zip"
+            exit 1
+          fi
+
+      # Standard "drag to Applications" DMG layout: the .app plus a symlink
+      # to /Applications in the same folder, imaged with hdiutil (built into
+      # macOS, no extra tooling required). Building the symlink and volume
+      # directly with hdiutil — rather than a Finder/AppleScript-based tool
+      # like create-dmg — avoids relying on a logged-in GUI session, which
+      # GitHub-hosted macOS runners don't provide.
+      - name: Create Applications symlink
+        run: ln -s /Applications dmg-root/Applications
+
+      - name: Build DMG
+        run: |
+          hdiutil create \
+            -volname "Marklens" \
+            -srcfolder dmg-root \
+            -fs HFS+ \
+            -format UDZO \
+            -ov \
+            Marklens.dmg
+
+      - name: Attach DMG to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            Marklens.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
