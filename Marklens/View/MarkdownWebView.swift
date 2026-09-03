@@ -29,6 +29,11 @@ struct MarkdownWebView: PlatformViewRepresentable {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
+        // links.js posts clicked hrefs here. WebKit won't navigate a
+        // loadHTMLString page to a file outside its base directory — and won't
+        // ask the navigation delegate first — so links between documents have
+        // to come through this bridge rather than as navigations.
+        config.userContentController.add(context.coordinator, name: Coordinator.linkMessageName)
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -86,7 +91,9 @@ struct MarkdownWebView: PlatformViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        static let linkMessageName = "marklensLink"
+
         var lastBody: String = ""
         var lastMermaid: Bool = false
         var lastDark: Bool = false
@@ -96,26 +103,51 @@ struct MarkdownWebView: PlatformViewRepresentable {
             Task { @MainActor in self.controller?.isReady = true }
         }
 
+        func userContentController(_ controller: WKUserContentController,
+                                   didReceive message: WKScriptMessage) {
+            guard message.name == Coordinator.linkMessageName,
+                  let href = message.body as? String,
+                  let webView = message.webView,
+                  let url = URL(string: href, relativeTo: webView.url)?.absoluteURL
+            else { return }
+            route(url, from: webView)
+        }
+
+        /// Shared by the message bridge and the navigation delegate so both
+        /// paths apply the same rules.
+        private func route(_ url: URL, from webView: WKWebView) {
+            switch LinkRouter.action(for: url,
+                                     currentDocumentURL: webView.url,
+                                     bundleDirectory: Bundle.main.bundleURL) {
+            case .openExternally(let target): LinkOpener.open(target)
+            case .openFile(let target): LinkOpener.openFile(target)
+            case .allowInPage, .block: break
+            }
+        }
+
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url else {
-                decisionHandler(.allow); return
-            }
-            // Allow the initial loadHTMLString navigation (about:blank or file://)
-            if navigationAction.navigationType == .other,
-               url.scheme == "about" || url.isFileURL {
-                decisionHandler(.allow); return
-            }
-            // Anything user-initiated → open in default browser.
-            if navigationAction.navigationType == .linkActivated {
-                #if os(macOS)
-                NSWorkspace.shared.open(url)
-                #else
-                UIApplication.shared.open(url)
-                #endif
                 decisionHandler(.cancel); return
             }
-            decisionHandler(.allow)
+            // The template load itself — not a link the user clicked.
+            if navigationAction.navigationType == .other,
+               LinkRouter.isTemplateLoad(url, bundleDirectory: Bundle.main.bundleURL) {
+                decisionHandler(.allow); return
+            }
+
+            // Anchors reach us as navigations; everything else normally arrives
+            // through the links.js bridge. This still runs as a backstop for
+            // navigations the page starts on its own.
+            if case .allowInPage = LinkRouter.action(for: url,
+                                                     currentDocumentURL: webView.url,
+                                                     bundleDirectory: Bundle.main.bundleURL) {
+                // An anchor into the page we're already showing: letting this
+                // through is what makes a table of contents scroll.
+                decisionHandler(.allow); return
+            }
+            decisionHandler(.cancel)
+            route(url, from: webView)
         }
     }
 }

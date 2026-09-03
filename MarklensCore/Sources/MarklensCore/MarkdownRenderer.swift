@@ -4,14 +4,28 @@ import Markdown
 public struct MarkdownRenderer {
     public init() {}
 
-    public func renderHTML(from source: String) -> RenderedDocument {
-        let document = Document(parsing: source)
+    /// - Parameter baseDirectory: the folder the markdown file lives in, used to
+    ///   resolve document-relative links. Pass `nil` when there is no file on
+    ///   disk; relative links are then left untouched.
+    public func renderHTML(from source: String, baseDirectory: URL? = nil) -> RenderedDocument {
+        var document = Document(parsing: source)
+
+        var sanitizer = LinkSanitizer(baseDirectory: baseDirectory)
+        if let rewritten = sanitizer.visit(document) as? Document {
+            document = rewritten
+        }
 
         var detector = MermaidDetector()
         detector.visit(document)
 
+        var headings = HeadingCollector()
+        headings.visit(document)
+
         let rawHTML = HTMLFormatter.format(document, options: [.parseAsides])
-        let body = MermaidPostProcessor.transform(rawHTML)
+        // Anchors first: at this point mermaid bodies are still HTML-escaped, so
+        // a `<h2>` inside a diagram can't be mistaken for a real heading.
+        let anchored = HeadingAnchorInjector.inject(into: rawHTML, headings: headings.headings)
+        let body = MermaidPostProcessor.transform(anchored)
 
         return RenderedDocument(body: body, containsMermaid: detector.found)
     }
@@ -20,6 +34,15 @@ public struct MarkdownRenderer {
 public struct RenderedDocument {
     public let body: String
     public let containsMermaid: Bool
+}
+
+/// Collects headings in document order so we can give each one an `id`.
+private struct HeadingCollector: MarkupWalker {
+    var headings: [HeadingRef] = []
+
+    mutating func visitHeading(_ heading: Heading) {
+        headings.append(HeadingRef(level: heading.level, plainText: heading.plainText))
+    }
 }
 
 private struct MermaidDetector: MarkupWalker {
