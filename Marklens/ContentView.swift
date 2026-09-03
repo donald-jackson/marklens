@@ -67,8 +67,11 @@ struct ContentView: View {
     private func render() async {
         let source = reloader.source
         webController.isReady = false
+        // The folder the file lives in, so document-relative links resolve
+        // against the user's document rather than our bundled Web/ resources.
+        let baseDirectory = fileURL?.deletingLastPathComponent()
         let result = await Task.detached(priority: .userInitiated) {
-            MarkdownRenderer().renderHTML(from: source)
+            MarkdownRenderer().renderHTML(from: source, baseDirectory: baseDirectory)
         }.value
         self.rendered = result
     }

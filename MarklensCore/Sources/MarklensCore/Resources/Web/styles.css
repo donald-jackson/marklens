@@ -63,6 +63,9 @@ h1, h2, h3, h4, h5, h6 {
     margin-top: 1.8em;
     margin-bottom: 0.6em;
     letter-spacing: -0.01em;
+    /* Jumping to #anchor shouldn't leave the heading jammed against the top
+       edge, or hidden behind the find bar that overlays it. */
+    scroll-margin-top: 3rem;
 }
 h1 { font-size: 2.1em; margin-top: 0.3em; letter-spacing: -0.02em; }
 h2 { font-size: 1.55em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
