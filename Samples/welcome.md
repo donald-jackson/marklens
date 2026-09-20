@@ -71,7 +71,7 @@ sequenceDiagram
 | GFM tables  | ✓ | Alignment honored |
 | Task lists  | ✓ | Read-only |
 | Footnotes   | ✗ | v1 |
-| Math (KaTeX)| ✗ | Future |
+| Math (KaTeX)| ✓ | `$…$` and `$$…$$` |
 
 ## Task list
 

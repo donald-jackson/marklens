@@ -33,6 +33,17 @@ struct HeadingRef {
     /// this is exactly what lands between the tags — which lets us find the
     /// tag by literal match instead of parsing HTML.
     let plainText: String
+    /// What the `id` is derived from. Normally the same string, but a heading
+    /// containing math holds a placeholder token in `plainText`, and slugging
+    /// that would give `## Cost $x$` the id `cost-` instead of GitHub's
+    /// `cost-x`.
+    let slugText: String
+
+    init(level: Int, plainText: String, slugText: String? = nil) {
+        self.level = level
+        self.plainText = plainText
+        self.slugText = slugText ?? plainText
+    }
 }
 
 /// Adds `id` attributes to the headings `HTMLFormatter` emits without them.
@@ -49,7 +60,7 @@ enum HeadingAnchorInjector {
         for heading in headings {
             let openTag = "<h\(heading.level)>"
             let tag = openTag + heading.plainText + "</h\(heading.level)>"
-            let id = HeadingSlug.unique(HeadingSlug.slug(for: heading.plainText), seen: &seen)
+            let id = HeadingSlug.unique(HeadingSlug.slug(for: heading.slugText), seen: &seen)
 
             guard let range = html.range(of: tag, range: cursor..<html.endIndex) else {
                 // Shouldn't happen, but never drop content if it does — the
@@ -57,7 +68,7 @@ enum HeadingAnchorInjector {
                 continue
             }
             result.append(contentsOf: html[cursor..<range.lowerBound])
-            result.append("<h\(heading.level) id=\"\(escapeAttribute(id))\">")
+            result.append("<h\(heading.level) id=\"\(escapeHTML(id))\">")
             result.append(contentsOf: html[html.index(range.lowerBound, offsetBy: openTag.count)..<range.upperBound])
             cursor = range.upperBound
         }
@@ -67,7 +78,10 @@ enum HeadingAnchorInjector {
     }
 }
 
-func escapeAttribute(_ value: String) -> String {
+/// Escapes text for HTML. `&` must go first or every ampersand ends up
+/// double-escaped — which is exactly the `\begin{matrix} a & b \end{matrix}`
+/// case. Shared with `MathPostProcessor`.
+func escapeHTML(_ value: String) -> String {
     value
         .replacingOccurrences(of: "&", with: "&amp;")
         .replacingOccurrences(of: "\"", with: "&quot;")

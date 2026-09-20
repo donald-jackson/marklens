@@ -5,7 +5,11 @@
     var currentIndex = -1;
     var lastQuery = '';
 
-    var SKIP_SELECTOR = '.mermaid, svg, script, style, mark.ml-find';
+    // KaTeX renders each formula twice (MathML for VoiceOver, HTML for display),
+    // so without .katex every hit counts double and Enter appears to do nothing.
+    // Worse, marking up .katex-html breaks the formula's inline-box layout, and
+    // clear()'s normalize() below makes that damage permanent.
+    var SKIP_SELECTOR = '.mermaid, .katex, svg, script, style, mark.ml-find';
 
     function escapeRegex(s) {
         return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

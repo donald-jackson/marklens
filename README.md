@@ -21,6 +21,7 @@ Mermaid, syntax highlighting), and gets out of your way.
 - ✓ GitHub-flavored markdown via Apple's `swift-markdown`
 - ✓ Code syntax highlighting (highlight.js, ~50KB bundled)
 - ✓ Mermaid diagrams (mermaid.js, fully offline)
+- ✓ LaTeX math — `$…$` and `$$…$$` (KaTeX, fully offline)
 - ✓ Light/dark theme follows system, no reload
 - ✓ macOS Quick Look extension — press space on any `.md`
 - ✓ Drag-and-drop, Open With, recent files (all from `DocumentGroup`)
@@ -115,6 +116,7 @@ them here so future contributors don't relive them.
 - mermaid `11.4.1` (UMD single-file build, ~2.5 MB)
 - highlight.js `11.10.0` (common subset, ~120 KB)
 - highlight.js themes: GitHub light + GitHub dark
+- KaTeX `0.18.7` (~270 KB JS + 24 KB CSS + 20 woff2 faces, ~300 KB)
 
 Edit the script to bump versions.
 

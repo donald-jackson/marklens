@@ -8,7 +8,12 @@ public struct MarkdownRenderer {
     ///   resolve document-relative links. Pass `nil` when there is no file on
     ///   disk; relative links are then left untouched.
     public func renderHTML(from source: String, baseDirectory: URL? = nil) -> RenderedDocument {
-        var document = Document(parsing: source)
+        // Math comes out before cmark ever sees it: CommonMark eats `\_`, `\*`
+        // and `\\` as escapes, turns `_x_` into `<em>`, and (smart punctuation
+        // is on) rewrites `--` and `"`. There is no recovering a formula from
+        // the DOM afterwards.
+        let math = MathExtractor.extract(from: source)
+        var document = Document(parsing: math.source)
 
         var sanitizer = LinkSanitizer(baseDirectory: baseDirectory)
         if let rewritten = sanitizer.visit(document) as? Document {
@@ -20,20 +25,35 @@ public struct MarkdownRenderer {
 
         var headings = HeadingCollector()
         headings.visit(document)
+        // Slugs come from the LaTeX, not the placeholder, so a heading with
+        // math still gets the id GitHub would give it.
+        let headingRefs = math.containsMath
+            ? headings.headings.map {
+                HeadingRef(level: $0.level,
+                           plainText: $0.plainText,
+                           slugText: MathPlaceholder.restoring($0.plainText, spans: math.spans))
+            }
+            : headings.headings
 
         let rawHTML = HTMLFormatter.format(document, options: [.parseAsides])
-        // Anchors first: at this point mermaid bodies are still HTML-escaped, so
-        // a `<h2>` inside a diagram can't be mistaken for a real heading.
-        let anchored = HeadingAnchorInjector.inject(into: rawHTML, headings: headings.headings)
-        let body = MermaidPostProcessor.transform(anchored)
+        // Anchors first: the injector matches each heading by the literal text
+        // the parser saw, so it has to run before anything rewrites that text.
+        // (`HTMLFormatter` escapes nothing at all, so nothing here is escaped
+        // yet — every raw-HTML producer below owns its own escaping.)
+        let anchored = HeadingAnchorInjector.inject(into: rawHTML, headings: headingRefs)
+        let mermaid = MermaidPostProcessor.transform(anchored)
+        let body = MathPostProcessor.reinject(mermaid, spans: math.spans)
 
-        return RenderedDocument(body: body, containsMermaid: detector.found)
+        return RenderedDocument(body: body,
+                                containsMermaid: detector.found,
+                                containsMath: math.containsMath)
     }
 }
 
 public struct RenderedDocument {
     public let body: String
     public let containsMermaid: Bool
+    public let containsMath: Bool
 }
 
 /// Collects headings in document order so we can give each one an `id`.
