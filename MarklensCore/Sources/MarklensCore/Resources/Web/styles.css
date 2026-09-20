@@ -246,3 +246,61 @@ mark.ml-find-current {
 
 /* A bad formula's colour is set by KaTeX's errorColor option, written inline —
    see the bootstrap in HTMLTemplate. There is nothing to style here. */
+
+/* Print / PDF export
+   ------------------
+   Exported PDFs go through WebKit's print path (WebViewController.exportPDF),
+   so these rules decide where pages break. Page geometry — A4 and its margins —
+   comes from the print job itself, not from @page, because WebKit honours the
+   job's imageable area more reliably than the CSS. */
+@media print {
+    /* The screen's reading gutter would double the page margins. */
+    article#content {
+        padding: 0;
+        max-width: none;
+    }
+
+    /* Print drops backgrounds and trims colours by default, which would strip
+       the code-block and table shading that carries a lot of this design. */
+    html {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* WebKit honours `break-inside: avoid` but ignores `break-after: avoid`,
+       so a heading would otherwise be left stranded at the foot of a page with
+       its content overleaf. Forced breaks *are* reliable, so the export pass
+       measures the layout and marks the headings that need one. */
+    h1, h2, h3, h4, h5, h6 {
+        break-after: avoid;   /* honoured by other engines; harmless here */
+        break-inside: avoid;
+    }
+    .ml-page-break {
+        break-before: page;
+    }
+    /* Never leave one line of a paragraph behind or carry one over. */
+    p, li { orphans: 3; widows: 3; }
+
+    /* Blocks that stop making sense when split. WebKit still breaks one that
+       cannot fit on a page at all, which is the right fallback. */
+    pre, blockquote, aside, table, img,
+    .mermaid, .ml-math-display, .katex-display {
+        break-inside: avoid;
+    }
+    tr { break-inside: avoid; }
+    /* A table long enough to span pages repeats its header on each. */
+    thead { display: table-header-group; }
+
+    /* Nothing scrolls on paper. Wrapping a long code line is the only way not
+       to lose the right-hand side of it. */
+    pre {
+        overflow: visible;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+    /* Over-wide math is scaled to fit by the export pass, which needs the
+       clipping gone before it can measure. */
+    .ml-math-display {
+        overflow: visible;
+    }
+}
