@@ -48,6 +48,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController,
         let html = HTMLTemplate.page(
             body: rendered.body,
             containsMermaid: rendered.containsMermaid,
+            containsMath: rendered.containsMath,
             dark: isDark
         )
 

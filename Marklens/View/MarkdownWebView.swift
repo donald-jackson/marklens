@@ -63,13 +63,17 @@ struct MarkdownWebView: PlatformViewRepresentable {
         let html = HTMLTemplate.page(
             body: rendered.body,
             containsMermaid: rendered.containsMermaid,
+            containsMath: rendered.containsMath,
             dark: dark
         )
         // Only reload if the rendered content changed; theme-only changes are pushed via JS.
-        if coordinator.lastBody != rendered.body || coordinator.lastMermaid != rendered.containsMermaid {
+        if coordinator.lastBody != rendered.body
+            || coordinator.lastMermaid != rendered.containsMermaid
+            || coordinator.lastMath != rendered.containsMath {
             webView.loadHTMLString(html, baseURL: baseURL)
             coordinator.lastBody = rendered.body
             coordinator.lastMermaid = rendered.containsMermaid
+            coordinator.lastMath = rendered.containsMath
             coordinator.lastDark = dark
         } else if coordinator.lastDark != dark {
             let theme = dark ? "dark" : "light"
@@ -79,6 +83,12 @@ struct MarkdownWebView: PlatformViewRepresentable {
                 document.documentElement.dataset.theme = '\(theme)';
                 var link = document.getElementById('hljs-theme');
                 if (link) link.href = '\(hljsHref)';
+                // Math needs no re-render: KaTeX's output takes its colour
+                // from `currentColor`, so changing --fg repaints it. Mermaid
+                // bakes theme colours into the SVG it generates, which is why
+                // it alone has to run again. (Re-rendering math would also be
+                // wrong — katex.render replaces the element's children, so a
+                // second pass would feed rendered text back to the parser.)
                 if (window.mermaid) {
                     document.querySelectorAll('.mermaid').forEach(function(el){ el.removeAttribute('data-processed'); });
                     window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: '\(theme)' });
@@ -96,6 +106,7 @@ struct MarkdownWebView: PlatformViewRepresentable {
 
         var lastBody: String = ""
         var lastMermaid: Bool = false
+        var lastMath: Bool = false
         var lastDark: Bool = false
         weak var controller: WebViewController?
 

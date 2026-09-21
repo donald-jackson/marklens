@@ -112,25 +112,25 @@ struct LinkSanitizer: MarkupRewriter {
         if let scheme = scheme(of: trimmed) {
             // Absolute URL. Keep it unless it can execute.
             let dangerous: Set<String> = ["javascript", "data", "vbscript"]
-            return dangerous.contains(scheme) ? nil : escapeAttribute(trimmed)
+            return dangerous.contains(scheme) ? nil : escapeHTML(trimmed)
         }
 
         // Fragment-only links stay relative — they're anchors into this page.
-        if trimmed.hasPrefix("#") { return escapeAttribute(trimmed) }
+        if trimmed.hasPrefix("#") { return escapeHTML(trimmed) }
 
         // Document-relative. Without a document directory (an unsaved buffer)
         // there's nothing to resolve against, so leave it be.
-        guard let baseDirectory else { return escapeAttribute(trimmed) }
+        guard let baseDirectory else { return escapeHTML(trimmed) }
 
         let (path, fragment) = splitFragment(trimmed)
-        guard !path.isEmpty else { return escapeAttribute(trimmed) }
+        guard !path.isEmpty else { return escapeHTML(trimmed) }
 
         // Markdown destinations may already be percent-encoded; decode first so
         // `URL(fileURLWithPath:)` doesn't double-encode `%20` into `%2520`.
         let decoded = path.removingPercentEncoding ?? path
         let resolved = URL(fileURLWithPath: decoded, relativeTo: baseDirectory).standardizedFileURL
         let absolute = fragment.map { "\(resolved.absoluteString)#\($0)" } ?? resolved.absoluteString
-        return escapeAttribute(absolute)
+        return escapeHTML(absolute)
     }
 
     /// RFC 3986 scheme prefix, lowercased — `URL(string:)` rejects destinations

@@ -23,3 +23,6 @@ MarklensCore/Sources/MarklensCore/Resources/Web/mermaid.min.js
 MarklensCore/Sources/MarklensCore/Resources/Web/highlight.min.js
 MarklensCore/Sources/MarklensCore/Resources/Web/hljs-light.css
 MarklensCore/Sources/MarklensCore/Resources/Web/hljs-dark.css
+MarklensCore/Sources/MarklensCore/Resources/Web/katex.min.js
+MarklensCore/Sources/MarklensCore/Resources/Web/katex.min.css
+MarklensCore/Sources/MarklensCore/Resources/Web/fonts/
