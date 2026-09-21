@@ -73,7 +73,7 @@ enum PDFExporter {
         let js = """
             // KaTeX's faces load asynchronously. Measuring before they arrive
             // takes fallback metrics, and the print pass then uses the real
-            // ones — so the zoom and the page breaks describe a
+            // ones — so the scaling and the page breaks would describe a
             // layout that is never printed.
             await document.fonts.ready;
 
@@ -134,17 +134,26 @@ enum PDFExporter {
             }
 
             // Over-wide math can't be talked down by CSS — KaTeX gives a
-            // formula an intrinsic width with white-space: nowrap — so it gets
-            // measured and zoomed. `zoom`, not `transform: scale`, because zoom
-            // reflows and so leaves no gap behind.
+            // formula an intrinsic width with white-space: nowrap — so it has
+            // to be measured and scaled.
+            //
+            // Scaling is done with font-size, not `zoom`. KaTeX sizes
+            // everything in em, so a smaller font size reflows the formula
+            // through ordinary layout and the box height follows. `zoom` is
+            // non-standard, and in a paginated layout it puts the formula in
+            // the wrong place — on top of the paragraph above it.
+            var targets = article.querySelectorAll('.ml-math-display');
             probe.querySelectorAll('.ml-math-display').forEach(function (el, i) {
                 var inner = el.firstElementChild || el;
                 var w = inner.scrollWidth || el.scrollWidth;
                 if (!w || w <= widthPx) return;
-                var target = article.querySelectorAll('.ml-math-display')[i];
+                var target = targets[i];
                 if (!target) return;
-                target.dataset.printPrevZoom = target.style.zoom || '';
-                el.style.zoom = target.style.zoom = (widthPx / w).toFixed(4);
+                // A little under the limit: scaling is proportional but text
+                // shaping is not perfectly linear, so leave a hair of room.
+                var scale = (widthPx / w) * 0.99;
+                target.dataset.printPrevFontSize = target.style.fontSize || '';
+                el.style.fontSize = target.style.fontSize = (scale * 100).toFixed(2) + '%';
             });
             probe.offsetHeight;
 
@@ -206,9 +215,9 @@ enum PDFExporter {
         let js = """
         (function () {
             document.querySelectorAll('.ml-math-display').forEach(function (el) {
-                if (el.dataset.printPrevZoom === undefined) return;
-                el.style.zoom = el.dataset.printPrevZoom;
-                delete el.dataset.printPrevZoom;
+                if (el.dataset.printPrevFontSize === undefined) return;
+                el.style.fontSize = el.dataset.printPrevFontSize;
+                delete el.dataset.printPrevFontSize;
             });
             document.querySelectorAll('.ml-page-break').forEach(function (el) {
                 el.classList.remove('ml-page-break');
