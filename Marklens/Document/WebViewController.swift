@@ -31,6 +31,52 @@ final class WebViewController: ObservableObject {
         return try await PDFExporter.export(webView)
     }
 
+    /// Hands the document to the system print panel.
+    ///
+    /// This is the same WebKit print engine `PDFExporter` drives, but with
+    /// none of the preparation: no measured page breaks, no scaling of wide
+    /// formulas. Fewer moving parts, and the reader gets paper size, margins,
+    /// scale-to-fit and page range — plus "Save as PDF" — from the panel
+    /// itself. When an export comes out wrong, this is the path that says
+    /// whether the fault is ours or WebKit's.
+    func printDocument() {
+        guard let webView else { return }
+
+        #if os(macOS)
+        let info = NSPrintInfo.shared.copy() as? NSPrintInfo ?? NSPrintInfo()
+        // A4 as the starting point, to match Export PDF. The panel can change it.
+        info.paperSize = PDFExporter.pageSize
+        info.topMargin = PDFExporter.margin
+        info.bottomMargin = PDFExporter.margin
+        info.leftMargin = PDFExporter.margin
+        info.rightMargin = PDFExporter.margin
+        info.horizontalPagination = .fit
+        info.verticalPagination = .automatic
+        info.isHorizontallyCentered = false
+        info.isVerticallyCentered = false
+
+        let operation = webView.printOperation(with: info)
+        operation.showsPrintPanel = true
+        operation.showsProgressPanel = true
+        operation.view?.frame = CGRect(origin: .zero, size: PDFExporter.pageSize)
+
+        if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        } else {
+            operation.run()
+        }
+        #else
+        let info = UIPrintInfo(dictionary: nil)
+        info.outputType = .general
+        info.jobName = webView.title ?? "Document"
+
+        let controller = UIPrintInteractionController.shared
+        controller.printInfo = info
+        controller.printFormatter = webView.viewPrintFormatter()
+        controller.present(animated: true, completionHandler: nil)
+        #endif
+    }
+
     // MARK: Zoom
 
     func zoomIn() { applyZoom(currentZoom * zoomStep) }

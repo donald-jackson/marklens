@@ -136,6 +136,20 @@ struct Toolbar: ToolbarContent {
             #if os(macOS)
             .keyboardShortcut("e", modifiers: [.command, .shift])
             #endif
+
+            Divider()
+
+            // The system panel drives the same WebKit print engine without our
+            // page-break preparation, so it is both the fully standard route
+            // and the fallback when an export comes out wrong.
+            Button {
+                controller.printDocument()
+            } label: {
+                Label("Print…", systemImage: "printer")
+            }
+            #if os(macOS)
+            .keyboardShortcut("p", modifiers: .command)
+            #endif
         } label: {
             Label("Export PDF", systemImage: "arrow.up.doc")
         }
