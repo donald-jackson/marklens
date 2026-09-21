@@ -10,6 +10,10 @@ import Foundation
 struct MathSpan: Equatable {
     let latex: String
     let isDisplay: Bool
+    /// The matched source text, delimiters included. Used where a formula
+    /// turns out to sit somewhere markup can't take an element — a link
+    /// destination, say — and the original text has to go back instead.
+    let raw: String
 }
 
 struct MathExtraction {
@@ -17,6 +21,8 @@ struct MathExtraction {
     let source: String
     /// Spans in document order; a token's decoded value indexes into this.
     let spans: [MathSpan]
+    /// The scalars this document's tokens were built from.
+    let placeholder: MathPlaceholder
 
     var containsMath: Bool { !spans.isEmpty }
 }
@@ -39,30 +45,34 @@ struct MathDelimiters: OptionSet {
 enum MathExtractor {
     static func extract(from source: String,
                         delimiters: MathDelimiters = .standard) -> MathExtraction {
-        // Strip the placeholder range first so a document can't forge a token.
-        let sanitized = MathPlaceholder.stripReserved(from: source)
-
-        let hasCandidate = (delimiters.contains(.dollar) && sanitized.contains("$"))
-            || (delimiters.contains(.parenBracket) && sanitized.contains("\\"))
-        guard hasCandidate else { return MathExtraction(source: sanitized, spans: []) }
+        let hasCandidate = (delimiters.contains(.dollar) && source.contains("$"))
+            || (delimiters.contains(.parenBracket) && source.contains("\\"))
+        // Tokens are built from scalars this document doesn't use, so nothing
+        // has to be stripped out of it to keep them unforgeable. If there is
+        // no free run — which would take a document occupying the whole
+        // Private Use Area — leave it alone rather than damage it.
+        guard hasCandidate, let placeholder = MathPlaceholder.unused(in: source) else {
+            return MathExtraction(source: source, spans: [], placeholder: .unusedDefault)
+        }
 
         var spans: [MathSpan] = []
         var out = ""
-        out.reserveCapacity(sanitized.count)
+        out.reserveCapacity(source.count)
 
         // Eligible lines are grouped into maximal runs. Display math may span
         // lines within a chunk but never across one, so a fence or indented
         // block in the middle of a candidate simply terminates it.
-        for chunk in eligibleChunks(of: sanitized) {
+        for chunk in eligibleChunks(of: source) {
             switch chunk {
             case .skipped(let text):
                 out.append(contentsOf: text)
             case .scannable(let text):
-                scan(text, delimiters: delimiters, spans: &spans, into: &out)
+                scan(text, delimiters: delimiters, placeholder: placeholder,
+                     spans: &spans, into: &out)
             }
         }
 
-        return MathExtraction(source: out, spans: spans)
+        return MathExtraction(source: out, spans: spans, placeholder: placeholder)
     }
 
     // MARK: Phase 1 — line classification
@@ -84,7 +94,7 @@ enum MathExtractor {
         var previousBlank = true
 
         for (n, rawLine) in lines.enumerated() {
-            let line = dropTerminator(rawLine)
+            let line = strippingQuoteMarkers(dropTerminator(rawLine))
             let blank = line.allSatisfy { $0.isWhitespace }
             let (indent, contentStart) = indentWidth(of: line)
 
@@ -160,6 +170,26 @@ enum MathExtractor {
         return lines
     }
 
+    /// Removes CommonMark blockquote markers so the indent and fence tests see
+    /// what the block parser sees. `>     $$x$$` is an indented code block
+    /// inside a quote, and `> ~~~` opens a fence there — judged from the raw
+    /// line start, both look like ordinary prose.
+    private static func strippingQuoteMarkers(_ line: Substring) -> Substring {
+        var rest = line
+        while true {
+            var i = rest.startIndex
+            var spaces = 0
+            while i < rest.endIndex, rest[i] == " ", spaces < 3 {
+                spaces += 1
+                i = rest.index(after: i)
+            }
+            guard i < rest.endIndex, rest[i] == ">" else { return rest }
+            i = rest.index(after: i)
+            if i < rest.endIndex, rest[i] == " " { i = rest.index(after: i) }
+            rest = rest[i...]
+        }
+    }
+
     private static func dropTerminator(_ line: Substring) -> Substring {
         guard let last = line.last, last.isNewline else { return line }
         return line.dropLast()
@@ -202,6 +232,7 @@ enum MathExtractor {
 
     private static func scan(_ chunk: Substring,
                              delimiters: MathDelimiters,
+                             placeholder: MathPlaceholder,
                              spans: inout [MathSpan],
                              into out: inout String) {
         let chars = Array(chunk)
@@ -210,8 +241,10 @@ enum MathExtractor {
 
         func emit(latex: String, isDisplay: Bool, from start: Int, to end: Int) {
             out.append(contentsOf: chars[literalStart..<start])
-            out.append(MathPlaceholder.token(for: spans.count))
-            spans.append(MathSpan(latex: latex, isDisplay: isDisplay))
+            out.append(placeholder.token(for: spans.count))
+            spans.append(MathSpan(latex: latex,
+                                  isDisplay: isDisplay,
+                                  raw: String(chars[start..<end])))
             literalStart = end
             i = end
         }
@@ -239,16 +272,7 @@ enum MathExtractor {
             }
 
             if c == "`" {
-                // A code span is opaque. A run with no equal-length partner is
-                // literal text, so keep scanning past it — `` a ` b $x$ `` is
-                // math.
-                var run = 0
-                var j = i
-                while j < chars.count, chars[j] == "`" {
-                    run += 1
-                    j += 1
-                }
-                i = findBacktickRun(chars, from: j, length: run).map { $0 + run } ?? j
+                i = skippingCodeSpan(chars, from: i)
                 continue
             }
 
@@ -285,6 +309,23 @@ enum MathExtractor {
         chars[start..<end].contains { !$0.isWhitespace }
     }
 
+    /// Steps over a code span beginning at a backtick run. A run with no
+    /// equal-length partner is literal text, so this lands just past the run
+    /// itself and scanning continues — `` a ` b $x$ `` is math.
+    ///
+    /// Both close searches use this too. Without it a candidate that opens in
+    /// prose can close on a dollar *inside* a code span, which silently eats
+    /// the span: "It costs $5; use `price$` literally."
+    private static func skippingCodeSpan(_ chars: [Character], from start: Int) -> Int {
+        var run = 0
+        var j = start
+        while j < chars.count, chars[j] == "`" {
+            run += 1
+            j += 1
+        }
+        return findBacktickRun(chars, from: j, length: run).map { $0 + run } ?? j
+    }
+
     /// The start of the next run of *exactly* `length` backticks — CommonMark's
     /// matching rule, which is why a longer run doesn't close a shorter one.
     private static func findBacktickRun(_ chars: [Character], from start: Int, length: Int) -> Int? {
@@ -307,6 +348,10 @@ enum MathExtractor {
         while i < chars.count {
             if chars[i] == "\\" {
                 i += 2
+                continue
+            }
+            if chars[i] == "`" {
+                i = skippingCodeSpan(chars, from: i)
                 continue
             }
             if chars[i] == "$", i + 1 < chars.count, chars[i + 1] == "$" { return i }
@@ -349,7 +394,20 @@ enum MathExtractor {
             let c = chars[i]
 
             if c == "\\" {
+                // An escaped newline is still a line ending. Left uncounted, a
+                // candidate can run straight through a blank line and swallow
+                // the paragraph break.
+                if i + 1 < chars.count, chars[i + 1].isNewline {
+                    newlinesSinceContent += 1
+                    if newlinesSinceContent >= 2 { return nil }
+                } else {
+                    newlinesSinceContent = 0
+                }
                 i += 2
+                continue
+            }
+            if c == "`" {
+                i = skippingCodeSpan(chars, from: i)
                 newlinesSinceContent = 0
                 continue
             }

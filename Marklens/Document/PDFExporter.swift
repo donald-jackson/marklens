@@ -45,8 +45,11 @@ enum PDFExporter {
     /// Paginates the web view's current document into A4 pages.
     @MainActor
     static func export(_ webView: WKWebView) async throws -> Data {
-        await prepare(webView)
         do {
+            // A failed preparation means no forced breaks and no scaled math,
+            // so the export would quietly be the wrong shape. Better to say so
+            // than to hand back a PDF that looks finished.
+            try await prepare(webView)
             let data = try await paginate(webView)
             await restore(webView)
             return data
@@ -66,9 +69,14 @@ enum PDFExporter {
     /// avoid` does not. Rather than fight that, this measures the laid-out
     /// document and inserts *forced* breaks, which are honoured reliably.
     @MainActor
-    private static func prepare(_ webView: WKWebView) async {
+    private static func prepare(_ webView: WKWebView) async throws {
         let js = """
-        (function () {
+            // KaTeX's faces load asynchronously. Measuring before they arrive
+            // takes fallback metrics, and the print pass then uses the real
+            // ones — so the zoom and the page breaks describe a
+            // layout that is never printed.
+            await document.fonts.ready;
+
             var widthPx  = \(Int(contentWidthPx.rounded()));
             var heightPx = \(Int(contentHeightPx.rounded()));
 
@@ -188,9 +196,8 @@ enum PDFExporter {
 
             document.body.removeChild(probe);
             return marked;
-        })();
         """
-        _ = try? await webView.evaluateJavaScript(js)
+        _ = try await webView.callAsyncJavaScript(js, in: nil, in: .page)
     }
 
     /// Puts the document back exactly as the reader left it.
@@ -255,10 +262,19 @@ enum PDFExporter {
 
         guard let raw = context.data else { return false }
         let pixels = raw.bindMemory(to: UInt8.self, capacity: context.bytesPerRow * height)
+
+        // "Blank" cannot mean "white": the print rules keep the page
+        // background, so in the dark theme an empty sheet rasterises dark
+        // everywhere. A page is empty when it is all one shade, whatever that
+        // shade is.
+        let background = pixels[0]
+        let tolerance: UInt8 = 6
         for row in 0..<height {
             let start = row * context.bytesPerRow
-            for column in 0..<width where pixels[start + column] < 250 {
-                return false
+            for column in 0..<width {
+                let value = pixels[start + column]
+                let delta = value > background ? value - background : background - value
+                if delta > tolerance { return false }
             }
         }
         return true
@@ -299,21 +315,25 @@ enum PDFExporter {
         guard let window = webView.window else { throw Failure.printFailed }
         let succeeded = await withCheckedContinuation { continuation in
             let observer = PrintObserver(continuation)
-            printObserver = observer
+            printObservers.append(observer)
             operation.runModal(for: window,
                                delegate: observer,
                                didRun: #selector(PrintObserver.printOperationDidRun(_:success:contextInfo:)),
                                contextInfo: nil)
         }
-        printObserver = nil
         guard succeeded else { throw Failure.printFailed }
         defer { try? FileManager.default.removeItem(at: destination) }
         return trimmingTrailingBlankPages(try Data(contentsOf: destination))
     }
 
-    /// `runModal` takes an unowned delegate, so it has to be kept alive across
-    /// the callback.
-    @MainActor private static var printObserver: PrintObserver?
+    /// `runModal` takes its delegate unowned, so each observer has to be kept
+    /// alive until its callback arrives.
+    ///
+    /// One slot is not enough: every `DocumentGroup` window has its own export
+    /// guard, so two windows can export at once. A single slot would drop the
+    /// first observer when the second started, leaving `runModal` holding a
+    /// dangling delegate and the first export's continuation never resumed.
+    @MainActor private static var printObservers: [PrintObserver] = []
 
     private final class PrintObserver: NSObject {
         private let continuation: CheckedContinuation<Bool, Never>
@@ -329,6 +349,9 @@ enum PDFExporter {
             guard !resumed else { return }
             resumed = true
             continuation.resume(returning: success)
+            Task { @MainActor in
+                PDFExporter.printObservers.removeAll { $0 === self }
+            }
         }
     }
     #else

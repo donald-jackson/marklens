@@ -31,7 +31,7 @@ public struct MarkdownRenderer {
             ? headings.headings.map {
                 HeadingRef(level: $0.level,
                            plainText: $0.plainText,
-                           slugText: MathPlaceholder.restoring($0.plainText, spans: math.spans))
+                           slugText: math.placeholder.restoring($0.plainText, spans: math.spans))
             }
             : headings.headings
 
@@ -42,7 +42,9 @@ public struct MarkdownRenderer {
         // yet — every raw-HTML producer below owns its own escaping.)
         let anchored = HeadingAnchorInjector.inject(into: rawHTML, headings: headingRefs)
         let mermaid = MermaidPostProcessor.transform(anchored)
-        let body = MathPostProcessor.reinject(mermaid, spans: math.spans)
+        let body = MathPostProcessor.reinject(mermaid,
+                                              spans: math.spans,
+                                              placeholder: math.placeholder)
 
         return RenderedDocument(body: body,
                                 containsMermaid: detector.found,

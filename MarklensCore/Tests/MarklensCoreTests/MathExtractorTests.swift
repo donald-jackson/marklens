@@ -10,27 +10,33 @@ final class MathExtractorTests: XCTestCase {
         MathExtractor.extract(from: source, delimiters: delimiters)
     }
 
-    private func latex(_ source: String, file: StaticString = #filePath, line: UInt = #line) -> [String] {
+    private func latex(_ source: String) -> [String] {
         extract(source).spans.map(\.latex)
+    }
+
+    private func described(_ result: MathExtraction) -> String {
+        result.placeholder.describing(result.source)
     }
 
     // MARK: Happy path
 
     func testInlineMath() {
         let result = extract("Let $x + 1$ be")
-        XCTAssertEqual(result.spans, [MathSpan(latex: "x + 1", isDisplay: false)])
-        XCTAssertEqual(MathPlaceholder.describing(result.source), "Let ⟦math 0⟧ be")
+        XCTAssertEqual(result.spans, [MathSpan(latex: "x + 1", isDisplay: false, raw: "$x + 1$")])
+        XCTAssertEqual(described(result), "Let ⟦math 0⟧ be")
     }
 
     func testDisplayMath() {
         let result = extract("$$a = b$$")
-        XCTAssertEqual(result.spans, [MathSpan(latex: "a = b", isDisplay: true)])
+        XCTAssertEqual(result.spans, [MathSpan(latex: "a = b", isDisplay: true, raw: "$$a = b$$")])
     }
 
     func testTheZARCase() {
         let result = extract(#"$$\mathbf{ZAR\ 5,000,000.00}$$"#)
         XCTAssertEqual(result.spans,
-                       [MathSpan(latex: #"\mathbf{ZAR\ 5,000,000.00}"#, isDisplay: true)])
+                       [MathSpan(latex: #"\mathbf{ZAR\ 5,000,000.00}"#,
+                                 isDisplay: true,
+                                 raw: #"$$\mathbf{ZAR\ 5,000,000.00}$$"#)])
     }
 
     func testDisplayMathSpanningBlankLines() {
@@ -44,8 +50,7 @@ final class MathExtractorTests: XCTestCase {
         let result = extract("$a$ then $$b$$ then $c$")
         XCTAssertEqual(result.spans.map(\.latex), ["a", "b", "c"])
         XCTAssertEqual(result.spans.map(\.isDisplay), [false, true, false])
-        XCTAssertEqual(MathPlaceholder.describing(result.source),
-                       "⟦math 0⟧ then ⟦math 1⟧ then ⟦math 2⟧")
+        XCTAssertEqual(described(result), "⟦math 0⟧ then ⟦math 1⟧ then ⟦math 2⟧")
     }
 
     func testTenSpansUseMultiDigitTokens() {
@@ -53,7 +58,7 @@ final class MathExtractorTests: XCTestCase {
         let result = extract(source)
         XCTAssertEqual(result.spans.count, 12)
         XCTAssertEqual(result.spans.last?.latex, "x11")
-        XCTAssertTrue(MathPlaceholder.describing(result.source).hasSuffix("⟦math 11⟧"))
+        XCTAssertTrue(described(result).hasSuffix("⟦math 11⟧"))
     }
 
     // MARK: LaTeX that CommonMark would otherwise destroy
@@ -160,6 +165,23 @@ final class MathExtractorTests: XCTestCase {
         XCTAssertEqual(latex("$5x + 1$"), ["5x + 1"])
     }
 
+    /// A candidate that opens in prose must not close on a dollar inside a
+    /// code span — that silently eats the span.
+    func testCloseSearchSkipsCodeSpans() {
+        let result = extract("It costs $5; use `price$` literally.")
+        XCTAssertTrue(result.spans.isEmpty, "got: \(result.spans)")
+        XCTAssertEqual(result.source, "It costs $5; use `price$` literally.")
+    }
+
+    func testDisplayCloseSearchSkipsCodeSpans() {
+        XCTAssertTrue(extract("Cost $$5 and use `a$$b` here").spans.isEmpty)
+    }
+
+    /// A backslash before the first newline of a blank line still ends a line.
+    func testEscapedNewlineStillEndsTheLine() {
+        XCTAssertTrue(extract("a $x\\\n\ny$ b").spans.isEmpty)
+    }
+
     func testUnescapedDollarInsideACandidateAbandonsIt() {
         XCTAssertTrue(extract("$a $ b$").spans.isEmpty)
     }
@@ -191,18 +213,54 @@ final class MathExtractorTests: XCTestCase {
 
     // MARK: Placeholder integrity
 
-    func testReservedScalarsInSourceAreStripped() {
-        let forged = "\u{E000}\u{E010}\u{E001} and $x$"
+    /// Private Use Area scalars are legitimate content — icon fonts live
+    /// there — so a document must never lose them, with or without math.
+    func testPrivateUseScalarsInSourceAredPreserved() {
+        let forged = "\u{E000}\u{E010}\u{E001} icon \u{E0A0} and $x$"
         let result = extract(forged)
         XCTAssertEqual(result.spans.count, 1)
-        XCTAssertEqual(MathPlaceholder.describing(result.source), " and ⟦math 0⟧")
+        for scalar: UInt32 in [0xE000, 0xE010, 0xE001, 0xE0A0] {
+            XCTAssertTrue(result.source.unicodeScalars.contains { $0.value == scalar },
+                          "lost U+\(String(scalar, radix: 16, uppercase: true))")
+        }
+    }
+
+    func testPlaceholderAvoidsScalarsTheDocumentUses() {
+        let crowded = String(String.UnicodeScalarView((0xE000...0xE04F).map { Unicode.Scalar($0)! }))
+        let result = extract(crowded + " $x$")
+        XCTAssertEqual(result.spans.map(\.latex), ["x"])
+        XCTAssertEqual(described(result).hasSuffix("⟦math 0⟧"), true)
+        for scalar in 0xE000...0xE04F {
+            XCTAssertTrue(result.source.unicodeScalars.contains { $0.value == UInt32(scalar) },
+                          "lost U+\(String(scalar, radix: 16, uppercase: true))")
+        }
     }
 
     func testSourceWithoutMathIsReturnedUnchanged() {
-        let source = "# Title\n\nPlain _markdown_ with `code`.\n"
+        let source = "# Title\n\nPlain _markdown_ with `code`. Icon \u{E005}.\n"
         let result = extract(source)
         XCTAssertFalse(result.containsMath)
         XCTAssertEqual(result.source, source)
+    }
+
+    // MARK: Markdown containers
+
+    /// `>     $$x$$` is an indented code block inside a quote. Judged from the
+    /// raw line start it looks like prose.
+    func testIndentedCodeInsideABlockquoteIsNotMath() {
+        XCTAssertTrue(extract("> quote\n>\n>     $$x$$\n").spans.isEmpty)
+    }
+
+    func testFencedCodeInsideABlockquoteIsNotMath() {
+        XCTAssertTrue(extract("> ~~~\n> $x$\n> ~~~\n").spans.isEmpty)
+    }
+
+    func testNestedBlockquoteFenceIsNotMath() {
+        XCTAssertTrue(extract("> > ```\n> > $x$\n> > ```\n").spans.isEmpty)
+    }
+
+    func testOrdinaryBlockquoteProseStillGetsMath() {
+        XCTAssertEqual(latex("> a quote with $x$ in it"), ["x"])
     }
 
     // MARK: Opt-in delimiters
@@ -213,7 +271,7 @@ final class MathExtractorTests: XCTestCase {
 
     func testParenBracketDelimitersWhenEnabled() {
         let result = extract(#"\(x\) and \[y\]"#, delimiters: [.dollar, .parenBracket])
-        XCTAssertEqual(result.spans, [MathSpan(latex: "x", isDisplay: false),
-                                      MathSpan(latex: "y", isDisplay: true)])
+        XCTAssertEqual(result.spans, [MathSpan(latex: "x", isDisplay: false, raw: #"\(x\)"#),
+                                      MathSpan(latex: "y", isDisplay: true, raw: #"\[y\]"#)])
     }
 }

@@ -15,14 +15,53 @@ import Foundation
 /// keeps only `isLetter || isNumber || - || _`, and PUA scalars are category
 /// `Co`, so the token drops out of the slug entirely. An ASCII token would leak
 /// into the `id` of every heading containing math.
-enum MathPlaceholder {
-    static let open: Character = "\u{E000}"
-    static let close: Character = "\u{E001}"
+///
+/// The scalars are chosen per document rather than fixed. A fixed range would
+/// have to be scrubbed from the source to stay unforgeable, and PUA scalars are
+/// legitimate content — icon fonts live there — so deleting them silently
+/// damages documents that contain no math at all.
+struct MathPlaceholder {
+    /// Twelve consecutive scalars: open, close, then the ten digits.
+    private let base: UInt32
+    private static let width: UInt32 = 12
 
-    private static let digitBase: UInt32 = 0xE010
-    private static let reserved: ClosedRange<UInt32> = 0xE000...0xE01F
+    /// Only used where no math was found and no token is ever emitted.
+    static let unusedDefault = MathPlaceholder(base: 0xE000)
 
-    static func token(for index: Int) -> String {
+    private init(base: UInt32) {
+        self.base = base
+    }
+
+    var open: Character { Character(Unicode.Scalar(base)!) }
+    var close: Character { Character(Unicode.Scalar(base + 1)!) }
+    private var digitBase: UInt32 { base + 2 }
+
+    /// Finds a run of scalars the document doesn't already use, so a token can
+    /// only ever be one we wrote. Returns nil only if the source somehow
+    /// occupies the whole Private Use Area, in which case the caller should
+    /// leave the document alone rather than damage it.
+    static func unused(in source: String) -> MathPlaceholder? {
+        let range: ClosedRange<UInt32> = 0xE000...0xF8FF
+        var taken = Set<UInt32>()
+        for scalar in source.unicodeScalars where range.contains(scalar.value) {
+            taken.insert(scalar.value)
+        }
+        guard !taken.isEmpty else { return MathPlaceholder(base: range.lowerBound) }
+
+        var candidate = range.lowerBound
+        while candidate + width - 1 <= range.upperBound {
+            var clash: UInt32?
+            for offset in 0..<width where taken.contains(candidate + offset) {
+                clash = candidate + offset
+                break
+            }
+            guard let clash else { return MathPlaceholder(base: candidate) }
+            candidate = clash + 1
+        }
+        return nil
+    }
+
+    func token(for index: Int) -> String {
         var token = String(open)
         for digit in String(index) {
             guard let value = digit.wholeNumberValue,
@@ -35,7 +74,7 @@ enum MathPlaceholder {
 
     /// Decodes the token starting at `start`, returning its span index and the
     /// position just past the closing scalar.
-    static func decode(at start: String.Index, in text: String) -> (index: Int, end: String.Index)? {
+    func decode(at start: String.Index, in text: String) -> (index: Int, end: String.Index)? {
         var cursor = text.index(after: start)
         var value = 0
         var digits = 0
@@ -56,22 +95,8 @@ enum MathPlaceholder {
         return nil
     }
 
-    /// Removes the reserved range from user input, so a token can only ever be
-    /// one we wrote — unforgeable rather than merely improbable.
-    static func stripReserved(from source: String) -> String {
-        guard source.unicodeScalars.contains(where: { reserved.contains($0.value) }) else {
-            return source
-        }
-        var scalars = String.UnicodeScalarView()
-        for scalar in source.unicodeScalars where !reserved.contains(scalar.value) {
-            scalars.append(scalar)
-        }
-        return String(scalars)
-    }
-
     /// Rewrites every token in `text`. Returning `nil` leaves one as it is.
-    private static func substituting(_ text: String,
-                                     _ transform: (Int) -> String?) -> String {
+    private func substituting(_ text: String, _ transform: (Int) -> String?) -> String {
         guard text.contains(open) else { return text }
         var result = ""
         var i = text.startIndex
@@ -91,13 +116,13 @@ enum MathPlaceholder {
 
     /// Puts the LaTeX back, for text that is read rather than rendered — a
     /// heading slug, say.
-    static func restoring(_ text: String, spans: [MathSpan]) -> String {
+    func restoring(_ text: String, spans: [MathSpan]) -> String {
         substituting(text) { $0 < spans.count ? spans[$0].latex : nil }
     }
 
     /// Renders tokens readably (`⟦math 0⟧`) — PUA scalars are invisible when
     /// printed, which makes a failing test assertion impossible to read.
-    static func describing(_ text: String) -> String {
+    func describing(_ text: String) -> String {
         substituting(text) { "⟦math \($0)⟧" }
     }
 }

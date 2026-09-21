@@ -122,6 +122,37 @@ final class MathRenderingTests: XCTestCase {
         XCTAssertTrue(result.body.contains("$5."), "got: \(result.body)")
     }
 
+    // MARK: Formulas that land where an element can't go
+
+    /// A dollar pair inside a link destination used to put a `<span>` inside
+    /// the `href`, breaking both the tag and the link.
+    func testMathInALinkDestinationStaysALink() {
+        let body = renderer.renderHTML(from: "[link](https://example.test/$x$)").body
+        XCTAssertTrue(body.contains("href=\"https://example.test/$x$\""),
+                      "Expected an intact href, got: \(body)")
+        XCTAssertFalse(body.contains("<span class=\"ml-math\">x</span>\""),
+                       "Element leaked into an attribute: \(body)")
+        XCTAssertTrue(body.contains(">link</a>"), "got: \(body)")
+    }
+
+    func testMathInAnImageDestinationStaysAnImage() {
+        let body = renderer.renderHTML(from: "![alt](https://example.test/$x$.png)").body
+        XCTAssertTrue(body.contains("src=\"https://example.test/$x$.png\""), "got: \(body)")
+        XCTAssertFalse(body.contains("<span"), "got: \(body)")
+    }
+
+    func testMathInRawHTMLAttributeIsLeftAlone() {
+        let body = renderer.renderHTML(from: "<div data-note=\"$x$\">text</div>").body
+        XCTAssertTrue(body.contains("data-note=\"$x$\""), "got: \(body)")
+    }
+
+    /// The `<` of a plain comparison must not be mistaken for a tag, or the
+    /// formula after it would never be wrapped.
+    func testUnescapedAngleBracketInProseDoesNotSwallowMath() {
+        let body = renderer.renderHTML(from: "if a < b then $x$ holds").body
+        XCTAssertTrue(body.contains("<span class=\"ml-math\">x</span>"), "got: \(body)")
+    }
+
     // MARK: Interaction with the rest of the pipeline
 
     /// Math re-injection runs after `HeadingAnchorInjector`, which matches
@@ -174,9 +205,16 @@ final class MathRenderingTests: XCTestCase {
         XCTAssertTrue(result.body.contains("<em>markdown</em>"), "got: \(result.body)")
     }
 
+    func testMathInsideBlockquoteCodeIsNotRendered() {
+        let result = renderer.renderHTML(from: "> quote\n>\n>     $$x$$\n")
+        XCTAssertFalse(result.containsMath)
+        XCTAssertFalse(result.body.contains("ml-math"), "got: \(result.body)")
+        XCTAssertTrue(result.body.contains("$$x$$"), "got: \(result.body)")
+    }
+
     /// No placeholder scalar may ever reach the page.
     func testNoPlaceholderScalarsLeakIntoOutput() {
-        let sources = ["$x$", "$$y$$", "\u{E000}\u{E010}\u{E001} forged", "## H $z$", "plain"]
+        let sources = ["$x$", "$$y$$", "## H $z$", "plain"]
         for source in sources {
             let body = renderer.renderHTML(from: source).body
             XCTAssertFalse(body.unicodeScalars.contains { (0xE000...0xE01F).contains($0.value) },

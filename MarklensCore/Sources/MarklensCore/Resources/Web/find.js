@@ -9,15 +9,30 @@
     // so without .katex every hit counts double and Enter appears to do nothing.
     // Worse, marking up .katex-html breaks the formula's inline-box layout, and
     // clear()'s normalize() below makes that damage permanent.
+    //
+    // Skipping it would also make formulas unfindable, since katex.render
+    // replaces the wrapper's text and everything left sits under .katex. So
+    // each .ml-math is matched once against the TeX stashed in data-tex and
+    // highlighted as a whole element, without touching what KaTeX built.
     var SKIP_SELECTOR = '.mermaid, .katex, svg, script, style, mark.ml-find';
+    var MATH_HIT_CLASS = 'ml-find-math';
 
     function escapeRegex(s) {
         return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
+    function isMathHit(el) {
+        return el.classList && el.classList.contains(MATH_HIT_CLASS);
+    }
+
     function clear() {
         for (var i = 0; i < marks.length; i++) {
             var m = marks[i];
+            if (isMathHit(m)) {
+                m.classList.remove(MATH_HIT_CLASS);
+                m.classList.remove('ml-find-current');
+                continue;
+            }
             var parent = m.parentNode;
             if (!parent) continue;
             while (m.firstChild) parent.insertBefore(m.firstChild, m);
@@ -102,6 +117,28 @@
         for (var i = 0; i < nodes.length; i++) {
             wrapMatches(nodes[i], regex);
         }
+
+        // A formula counts once, matched against its TeX source. Highlighting
+        // the wrapper leaves KaTeX's own markup untouched.
+        var formulas = article.querySelectorAll('.ml-math[data-tex]');
+        for (var f = 0; f < formulas.length; f++) {
+            var el = formulas[f];
+            regex.lastIndex = 0;
+            if (!regex.test(el.dataset.tex)) continue;
+            el.classList.add(MATH_HIT_CLASS);
+            marks.push(el);
+        }
+        if (formulas.length) {
+            // next/previous should follow the page, not the order the two
+            // passes happened to find things in.
+            marks.sort(function (a, b) {
+                var order = a.compareDocumentPosition(b);
+                if (order & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+                if (order & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+                return 0;
+            });
+        }
+
         lastQuery = q;
         if (marks.length > 0) selectMatch(0);
         return [marks.length, currentIndex];

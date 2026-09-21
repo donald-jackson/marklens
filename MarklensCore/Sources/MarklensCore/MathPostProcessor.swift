@@ -9,7 +9,9 @@ import Foundation
 /// would leave the HTML holding a `<span>` where `plainText` holds the token,
 /// no match, and every heading containing math would silently lose its `id`.
 enum MathPostProcessor {
-    static func reinject(_ html: String, spans: [MathSpan]) -> String {
+    static func reinject(_ html: String,
+                         spans: [MathSpan],
+                         placeholder: MathPlaceholder) -> String {
         guard !spans.isEmpty else { return html }
 
         var result = ""
@@ -17,9 +19,47 @@ enum MathPostProcessor {
         var cursor = html.startIndex
         var i = html.startIndex
 
+        // A formula can land somewhere no element may go. `[a](http://h/$x$)`
+        // puts the token in an `href`, and wrapping it in a `<span>` there
+        // breaks both the tag and the link, so inside markup the original
+        // source text goes back instead.
+        var insideTag = false
+        var quote: Character?
+
         while i < html.endIndex {
-            guard html[i] == MathPlaceholder.open,
-                  let decoded = MathPlaceholder.decode(at: i, in: html),
+            let character = html[i]
+
+            if insideTag {
+                if let open = quote {
+                    if character == open { quote = nil }
+                } else if character == "\"" || character == "'" {
+                    quote = character
+                } else if character == ">" {
+                    insideTag = false
+                }
+
+                if character == placeholder.open,
+                   let decoded = placeholder.decode(at: i, in: html),
+                   decoded.index < spans.count {
+                    result.append(contentsOf: html[cursor..<i])
+                    result.append(escapeHTML(spans[decoded.index].raw))
+                    cursor = decoded.end
+                    i = decoded.end
+                    continue
+                }
+                i = html.index(after: i)
+                continue
+            }
+
+            if character == "<", startsTag(html, at: i) {
+                insideTag = true
+                quote = nil
+                i = html.index(after: i)
+                continue
+            }
+
+            guard character == placeholder.open,
+                  let decoded = placeholder.decode(at: i, in: html),
                   decoded.index < spans.count else {
                 i = html.index(after: i)
                 continue
@@ -57,5 +97,15 @@ enum MathPostProcessor {
 
         result.append(contentsOf: html[cursor..<html.endIndex])
         return result
+    }
+
+    /// `HTMLFormatter` emits text without escaping it, so a plain `a < b` in
+    /// the document reaches us as a bare `<`. Only a `<` that could actually
+    /// begin a tag starts one.
+    private static func startsTag(_ html: String, at index: String.Index) -> Bool {
+        let next = html.index(after: index)
+        guard next < html.endIndex else { return false }
+        let character = html[next]
+        return character.isLetter || character == "/" || character == "!"
     }
 }
