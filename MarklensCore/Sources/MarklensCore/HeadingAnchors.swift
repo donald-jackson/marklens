@@ -77,14 +77,3 @@ enum HeadingAnchorInjector {
         return result
     }
 }
-
-/// Escapes text for HTML. `&` must go first or every ampersand ends up
-/// double-escaped — which is exactly the `\begin{matrix} a & b \end{matrix}`
-/// case. Shared with `MathPostProcessor`.
-func escapeHTML(_ value: String) -> String {
-    value
-        .replacingOccurrences(of: "&", with: "&amp;")
-        .replacingOccurrences(of: "\"", with: "&quot;")
-        .replacingOccurrences(of: "<", with: "&lt;")
-        .replacingOccurrences(of: ">", with: "&gt;")
-}

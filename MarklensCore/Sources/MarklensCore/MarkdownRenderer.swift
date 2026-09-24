@@ -20,26 +20,40 @@ public struct MarkdownRenderer {
             document = rewritten
         }
 
+        // `HTMLFormatter` escapes nothing, so literal text and code have to be
+        // escaped before it sees them — otherwise a code span holding `<style>`
+        // opens a raw-text element and the browser swallows the rest of the
+        // page. Raw HTML is deliberately left alone.
+        var escaper = HTMLTextEscaper()
+        if let rewritten = escaper.visit(document) as? Document {
+            document = rewritten
+        }
+
         var detector = MermaidDetector()
         detector.visit(document)
 
         var headings = HeadingCollector()
         headings.visit(document)
-        // Slugs come from the LaTeX, not the placeholder, so a heading with
-        // math still gets the id GitHub would give it.
-        let headingRefs = math.containsMath
-            ? headings.headings.map {
-                HeadingRef(level: $0.level,
-                           plainText: $0.plainText,
-                           slugText: math.placeholder.restoring($0.plainText, spans: math.spans))
-            }
-            : headings.headings
+        // `plainText` now holds the escaped HTML the formatter will emit, which
+        // is what the anchor injector matches on. Slugs are read from the
+        // literal text, though: slugging the escaped text would give
+        // `Tom & Jerry` the id `tom-amp-jerry` instead of GitHub's
+        // `tom--jerry`. Restoring the LaTeX first keeps a heading with math
+        // slugging just as GitHub would.
+        let headingRefs = headings.headings.map { heading -> HeadingRef in
+            let restored = math.containsMath
+                ? math.placeholder.restoring(heading.plainText, spans: math.spans)
+                : heading.plainText
+            return HeadingRef(level: heading.level,
+                              plainText: heading.plainText,
+                              slugText: unescapeHTML(restored))
+        }
 
         let rawHTML = HTMLFormatter.format(document, options: [.parseAsides])
         // Anchors first: the injector matches each heading by the literal text
-        // the parser saw, so it has to run before anything rewrites that text.
-        // (`HTMLFormatter` escapes nothing at all, so nothing here is escaped
-        // yet — every raw-HTML producer below owns its own escaping.)
+        // the escapers left in the tree, so it has to run before anything
+        // rewrites that text. (`HTMLFormatter` itself escapes nothing, so every
+        // raw-HTML producer below still owns its own escaping.)
         let anchored = HeadingAnchorInjector.inject(into: rawHTML, headings: headingRefs)
         let mermaid = MermaidPostProcessor.transform(anchored)
         let body = MathPostProcessor.reinject(mermaid,
@@ -105,13 +119,4 @@ enum MermaidPostProcessor {
         result.append(contentsOf: html[cursor..<html.endIndex])
         return result
     }
-}
-
-private func unescapeHTML(_ s: String) -> String {
-    s
-        .replacingOccurrences(of: "&lt;", with: "<")
-        .replacingOccurrences(of: "&gt;", with: ">")
-        .replacingOccurrences(of: "&quot;", with: "\"")
-        .replacingOccurrences(of: "&#39;", with: "'")
-        .replacingOccurrences(of: "&amp;", with: "&")
 }

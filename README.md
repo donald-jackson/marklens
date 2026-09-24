@@ -33,7 +33,7 @@ marklens/
 ├── Marklens/                     SwiftUI app (macOS + iPadOS)
 ├── MarklensCore/                 SwiftPM package: parser → HTML + bundled web assets
 ├── MarklensQuickLook/            macOS Quick Look extension
-├── Samples/welcome.md            test fixture
+├── Samples/                      test fixtures (welcome.md, markdown-syntax.md, …)
 ├── design/icon.svg               source-of-truth app icon
 ├── scripts/
 │   ├── fetch-assets.sh           downloads mermaid.js + highlight.js
